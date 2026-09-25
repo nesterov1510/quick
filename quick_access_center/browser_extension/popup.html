@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quick Access · Автовход</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 17px; width: 340px; background: #171a22; color: #e0e5ee; font: 13px/1.5 system-ui, sans-serif; }
+    h1 { font-size: 16px; margin: 0 0 8px; }
+    p { margin: 8px 0; color: #afb9c9; }
+    code { display: block; overflow-wrap: anywhere; color: #a7c3f4; background: #222938; padding: 8px; border-radius: 6px; }
+    button { margin-top: 13px; border: 0; border-radius: 7px; padding: 10px 12px; width: 100%; font: inherit; font-weight: 700; color: #091221; background: #8cafe9; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #status { margin-top: 10px; min-height: 2.5em; }
+    .error { color: #ffa9a5 !important; }
+    .success { color: #9be9b1 !important; }
+  </style>
+</head>
+<body>
+  <h1>⚡ Quick Access · Автовход</h1>
+  <p>Поддерживаемый сайт: <b>msb-activity.meryosab.com</b>.</p>
+  <p>Откройте свою панель Quick Access, войдите в неё и нажмите кнопку ниже. Разрешение выдаётся только выбранному адресу панели.</p>
+  <code id="panel">Панель пока не подключена</code>
+  <button id="connect" type="button">Подключить открытую панель</button>
+  <p id="status" role="status" aria-live="polite"></p>
+  <script src="popup.js"></script>
+</body>
+</html>

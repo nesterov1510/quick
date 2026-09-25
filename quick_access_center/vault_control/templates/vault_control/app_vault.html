@@ -50,6 +50,9 @@
                             <div>
                                 <h3>{{ credential.title }}</h3>
                                 <span>Обновлено: {{ credential.updated_at }}</span>
+                                {% if credential.auto_login and auto_login_supported %}
+                                <span class="auto-login-tag">⚡ Выбран для автовхода</span>
+                                {% endif %}
                             </div>
                             <a class="small-button" href="{{ url_for('vault_control.app_vault', app_id=app_item.id, edit=credential.id) }}#credentialForm">Редактировать</a>
                         </div>
@@ -131,6 +134,16 @@
                     <span>Заметка</span>
                     <textarea name="notes" placeholder="2FA, резервные коды, назначение аккаунта, дополнительные инструкции...">{{ edit_credential.notes if edit_credential else '' }}</textarea>
                 </label>
+
+                {% if auto_login_supported %}
+                <label class="auto-login-option">
+                    <input type="checkbox" name="auto_login" value="1" {% if edit_credential and edit_credential.auto_login %}checked{% endif %}>
+                    <span><b>Использовать этот доступ для автовхода</b>
+                    <small>Только {{ auto_login_url }}. Если отмечен другой доступ этой карточки, выбор переключится на этот.</small></span>
+                </label>
+                {% else %}
+                <p class="auto-login-hint">Автовход с расширением сейчас поддерживается только для {{ auto_login_url }}. Остальные пароли остаются в Vault для ручного входа.</p>
+                {% endif %}
 
                 <button class="primary-button full" type="submit">
                     {{ 'Сохранить изменения' if edit_credential else 'Добавить зашифрованный доступ' }}

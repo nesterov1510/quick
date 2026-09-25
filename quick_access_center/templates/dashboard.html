@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>MSB Quick Access</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="quick-access-autologin" content="1">
+    {% if vault_autologin_csrf %}<meta name="quick-autologin-vault-csrf" content="{{ vault_autologin_csrf }}">{% endif %}
 
     <style>
 
@@ -682,6 +684,9 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+        .mini-card[data-auto-login="1"] .mini-type { color: var(--success-text); }
+        .auto-login-help { margin: 0 0 12px; color: var(--text-dim); font-size: 11.5px; line-height: 1.5; }
+        .auto-login-help a { color: var(--accent-text); text-decoration: underline; }
 
         .mini-address {
             max-width: 100%;
@@ -1093,7 +1098,7 @@
                 <div class="pill"><span class="dot bad"></span><b>{{ inactive_apps }}</b> offline</div>
             </div>
 
-            <a class="btn vault-top-btn" href="/vault/">🔐 Пароли</a>
+            <a class="btn vault-top-btn" href="/vault/">{{ '🔓 Vault открыт' if vault_autologin_csrf else '🔐 Пароли / открыть Vault' }}</a>
 
             <form class="logout-form" method="POST" action="{{ url_for('access_control.access_logout_route') }}">
                 <input type="hidden" name="csrf_token" value="{{ main_csrf_token }}">
@@ -1187,6 +1192,9 @@
         {% endwith %}
     </div>
 
+    {% if auto_login_ids %}
+    <p class="auto-login-help">⚡ Для отмеченных карточек: сначала <a href="/vault/">разблокируйте Vault</a> и подключите расширение Chrome/Edge к этой панели. Без расширения карточка только откроет страницу входа; пароль в URL не передаётся.</p>
+    {% endif %}
     {% if apps %}
     <div class="grid" id="cardsGrid">
         {% for item in apps %}
@@ -1198,6 +1206,7 @@
             aria-label="Открыть {{ item.name }}"
             title="Открыть {{ item.name }}"
             data-id="{{ item.id }}"
+            data-auto-login="{{ 1 if item.id in auto_login_ids else 0 }}"
             data-name="{{ item.name|e }}"
             data-status="{{ item.status|e }}"
             data-url="{{ item.url|e }}"
@@ -1223,8 +1232,8 @@
             <div class="mini-body">
                 <div class="mini-name" title="{{ item.name }}">{{ item.name }}</div>
 
-                <div class="mini-type" title="{{ item.app_type or 'Без категории' }}">
-                    {{ item.app_type or 'Без категории' }}
+                <div class="mini-type" title="{{ 'Автовход · ' if item.id in auto_login_ids else '' }}{{ item.app_type or 'Без категории' }}">
+                    {% if item.id in auto_login_ids %}⚡ Автовход · {% endif %}{{ item.app_type or 'Без категории' }}
                 </div>
 
                 <div class="mini-address" title="{{ item.address or item.url }}">

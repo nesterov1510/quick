@@ -7,11 +7,13 @@ import time
 from datetime import datetime
 from typing import Callable, Optional
 
+from cryptography.fernet import InvalidToken
 from flask import (
     Blueprint,
     Flask,
     abort,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -19,6 +21,7 @@ from flask import (
     url_for,
 )
 
+from vault_control.autologin import ACTIVITY_LOGIN_URL, is_supported_login_url
 from vault_control.vault_settings import (
     clear_failed_logins,
     clear_vault_session,
@@ -27,6 +30,7 @@ from vault_control.vault_settings import (
     format_seconds,
     get_client_ip,
     get_csrf_token,
+    get_fernet,
     get_login_lock_status,
     get_vault_config,
     is_ip_allowed,
@@ -101,14 +105,25 @@ def init_vault_db() -> None:
                 username_enc TEXT NOT NULL DEFAULT '',
                 password_enc TEXT NOT NULL DEFAULT '',
                 notes_enc TEXT NOT NULL DEFAULT '',
+                auto_login INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
             )
         """)
+        # Existing Vault databases predate the opt-in auto-login flag.
+        cur.execute("PRAGMA table_info(app_credentials)")
+        if "auto_login" not in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE app_credentials ADD COLUMN auto_login INTEGER NOT NULL DEFAULT 0"
+            )
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_app_credentials_app_id
             ON app_credentials(app_id)
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_app_credentials_one_auto_login
+            ON app_credentials(app_id) WHERE auto_login = 1
         """)
         conn.commit()
         _log_success("Таблица app_credentials готова")
@@ -144,6 +159,7 @@ def _decrypt_credential(row) -> dict:
         "username": decrypt_secret(row["username_enc"]),
         "password": decrypt_secret(row["password_enc"]),
         "notes": decrypt_secret(row["notes_enc"]),
+        "auto_login": bool(row["auto_login"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -153,6 +169,15 @@ def _require_csrf():
     if not validate_csrf_token():
         _log_warning(f"CSRF отклонён: ip={get_client_ip()}, path={request.path}")
         abort(400, description="Неверный CSRF-токен")
+
+
+def _requested_auto_login(app_item, username: str, password: str) -> bool:
+    requested = request.form.get("auto_login") == "1"
+    if requested and not is_supported_login_url(app_item["url"]):
+        abort(400, description="Автовход не разрешён для этой ссылки")
+    if requested and (not username or not password):
+        abort(400, description="Для автовхода нужны логин и пароль")
+    return requested
 
 
 def _render_login(error_message: str = "", next_url: str = "/vault/", login_value: str = ""):
@@ -370,9 +395,62 @@ def create_vault_blueprint() -> Blueprint:
             app_item=app_item,
             credentials=credentials,
             edit_credential=edit_credential,
+            auto_login_supported=is_supported_login_url(app_item["url"]),
+            auto_login_url=ACTIVITY_LOGIN_URL,
             csrf_token=get_csrf_token(),
             vault_user=session.get("vault_user", ""),
         )
+
+    @bp.route("/app/<int:app_id>/autologin", methods=["POST"])
+    @vault_login_required
+    def autologin_credential(app_id: int):
+        """Release only the explicitly selected credential for a pinned login URL.
+
+        The browser extension requests this with the existing Vault session and
+        Vault CSRF token. Never put a password in a redirect, query string or log.
+        """
+        _require_csrf()
+        conn = _get_db()
+        try:
+            app_item = conn.execute("SELECT url FROM apps WHERE id = ?", (app_id,)).fetchone()
+            if not app_item:
+                abort(404)
+            if not is_supported_login_url(app_item["url"]):
+                return jsonify({"ok": False, "error": "unsupported_target"}), 409
+
+            row = conn.execute(
+                """SELECT username_enc, password_enc FROM app_credentials
+                   WHERE app_id = ? AND auto_login = 1""",
+                (app_id,),
+            ).fetchone()
+            if not row or not row["username_enc"] or not row["password_enc"]:
+                return jsonify({"ok": False, "error": "not_enabled"}), 409
+
+            try:
+                cipher = get_fernet()
+                username = cipher.decrypt(row["username_enc"].encode("utf-8")).decode("utf-8")
+                password = cipher.decrypt(row["password_enc"].encode("utf-8")).decode("utf-8")
+            except (InvalidToken, UnicodeError, ValueError, RuntimeError):
+                _log_warning(f"Запись для автовхода повреждена: app_id={app_id}")
+                return jsonify({"ok": False, "error": "credential_unavailable"}), 409
+
+            if not username or not password:
+                return jsonify({"ok": False, "error": "credential_unavailable"}), 409
+
+            conn.execute(
+                """UPDATE apps SET open_count = open_count + 1, last_opened = ?
+                   WHERE id = ?""",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), app_id),
+            )
+            conn.commit()
+            return jsonify({
+                "ok": True,
+                "login_url": ACTIVITY_LOGIN_URL,
+                "username": username,
+                "password": password,
+            })
+        finally:
+            conn.close()
 
     @bp.route("/app/<int:app_id>/credential", methods=["POST"])
     @vault_login_required
@@ -391,16 +469,19 @@ def create_vault_blueprint() -> Blueprint:
             flash("Укажите название доступа", "error")
             return redirect(url_for("vault_control.app_vault", app_id=app_id))
 
+        auto_login = _requested_auto_login(app_item, username, password)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = _get_db()
         try:
             cur = conn.cursor()
+            if auto_login:
+                cur.execute("UPDATE app_credentials SET auto_login = 0 WHERE app_id = ?", (app_id,))
             cur.execute(
                 """
                 INSERT INTO app_credentials (
                     app_id, title_enc, username_enc, password_enc, notes_enc,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    auto_login, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     app_id,
@@ -408,6 +489,7 @@ def create_vault_blueprint() -> Blueprint:
                     encrypt_secret(username),
                     encrypt_secret(password),
                     encrypt_secret(notes),
+                    int(auto_login),
                     now,
                     now,
                 ),
@@ -432,6 +514,9 @@ def create_vault_blueprint() -> Blueprint:
             abort(404)
 
         app_id = int(row["app_id"])
+        app_item = _get_app(app_id)
+        if not app_item:
+            abort(404)
         title = request.form.get("title", "").strip()
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -441,13 +526,17 @@ def create_vault_blueprint() -> Blueprint:
             flash("Укажите название доступа", "error")
             return redirect(url_for("vault_control.app_vault", app_id=app_id, edit=credential_id))
 
+        auto_login = _requested_auto_login(app_item, username, password)
         conn = _get_db()
         try:
             cur = conn.cursor()
+            if auto_login:
+                cur.execute("UPDATE app_credentials SET auto_login = 0 WHERE app_id = ?", (app_id,))
             cur.execute(
                 """
                 UPDATE app_credentials
-                SET title_enc = ?, username_enc = ?, password_enc = ?, notes_enc = ?, updated_at = ?
+                SET title_enc = ?, username_enc = ?, password_enc = ?, notes_enc = ?,
+                    auto_login = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -455,6 +544,7 @@ def create_vault_blueprint() -> Blueprint:
                     encrypt_secret(username),
                     encrypt_secret(password),
                     encrypt_secret(notes),
+                    int(auto_login),
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     credential_id,
                 ),

@@ -264,6 +264,12 @@ init_db()
 # --------------------------------------------------------------------------------------
 try:
     from vault_control import init_vault_control
+    from vault_control.autologin import is_supported_login_url
+    from vault_control.vault_settings import (
+        get_csrf_token as get_vault_csrf_token,
+        get_vault_config,
+        is_vault_logged_in,
+    )
 
     init_vault_control(app, get_db)
 
@@ -275,6 +281,7 @@ try:
         "vault_control.vault_login",
         "vault_control.vault_logout",
         "vault_control.app_vault",
+        "vault_control.autologin_credential",
         "vault_control.create_credential",
         "vault_control.update_credential",
         "vault_control.delete_credential",
@@ -906,6 +913,17 @@ def dashboard():
         cur.execute(apps_sql, tuple(query_params))
         apps = cur.fetchall()
 
+        # Only deliberately selected credentials for the pinned HTTPS login
+        # page become auto-login cards. Passwords are never fetched here.
+        cur.execute("SELECT app_id FROM app_credentials WHERE auto_login = 1")
+        marked_ids = {int(row["app_id"]) for row in cur.fetchall()}
+        vault_enabled = get_vault_config()["enabled"]
+        auto_login_ids = {
+            int(item["id"]) for item in apps
+            if vault_enabled and int(item["id"]) in marked_ids
+            and is_supported_login_url(item["url"])
+        }
+
         cur.execute("SELECT COUNT(*) AS total FROM apps")
         total_apps = cur.fetchone()["total"]
 
@@ -917,9 +935,12 @@ def dashboard():
 
         conn.close()
 
+        vault_unlocked = vault_enabled and is_vault_logged_in()
         return render_template(
             "dashboard.html",
             apps=apps,
+            auto_login_ids=auto_login_ids,
+            vault_autologin_csrf=get_vault_csrf_token() if vault_unlocked else "",
             search=search,
             categories=categories,
             selected_category=selected_category,
@@ -934,6 +955,8 @@ def dashboard():
         return render_template(
             "dashboard.html",
             apps=[],
+            auto_login_ids=set(),
+            vault_autologin_csrf="",
             search=search,
             categories=[{"value": category_all, "label": "Все категории", "count": 0}],
             selected_category=category_all,
@@ -1012,7 +1035,10 @@ def add_app():
             conn = None
 
             log_success(f"Добавлено приложение: {name} -> {url}")
-            flash("Добавлено", "success")
+            if is_supported_login_url(url):
+                flash("Добавлено. Для автовхода сохраните логин/пароль через 🔐 на карточке и подключите расширение.", "success")
+            else:
+                flash("Добавлено", "success")
             return redirect(url_for("dashboard"))
 
         except Exception as e:

@@ -95,6 +95,28 @@ class QuickAccessTests(unittest.TestCase):
         self.assertEqual(dashboard.status_code, 200)
         return self.csrf_from(dashboard.get_data(as_text=True))
 
+    def unlock_vault(self) -> str:
+        page = self.client.get("/vault/login")
+        token = self.csrf_from(page.get_data(as_text=True))
+        response = self.client.post("/vault/login", data={
+            "username": "test-vault", "password": "example-vault-password", "csrf_token": token,
+            "next": "/",
+        })
+        self.assertEqual(response.status_code, 302)
+        dashboard = self.client.get("/").get_data(as_text=True)
+        match = re.search(r'<meta name="quick-autologin-vault-csrf" content="([^" ]+)"', dashboard)
+        self.assertIsNotNone(match, "Vault token absent from an unlocked dashboard")
+        return match.group(1)
+
+    def card_autologin(self, app_id: int) -> bool:
+        html = self.client.get("/").get_data(as_text=True)
+        match = re.search(
+            rf'<div\s+class="mini-card[^>]*data-id="{app_id}"[^>]*data-auto-login="([01])"',
+            html,
+        )
+        self.assertIsNotNone(match, f"Card {app_id} missing from dashboard")
+        return match.group(1) == "1"
+
     def add(self, token: str, name: str, url: str, category: str = "Demo") -> int:
         response = self.client.post("/add", data={
             "csrf_token": token, "name": name, "target": url, "app_type": category,
@@ -184,6 +206,132 @@ class QuickAccessTests(unittest.TestCase):
         self.client.post(f"/delete/{app_id}", data={"csrf_token": token})
         with closing(self.module.get_db()) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM app_credentials").fetchone()[0], 0)
+
+    def test_autologin_requires_main_vault_csrf_and_opt_in(self):
+        from vault_control.autologin import ACTIVITY_LOGIN_URL
+
+        path = "/vault/app/1/autologin"
+        unauthenticated = self.client.post(path, headers={"Accept": "application/json"})
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertNotIn("password", unauthenticated.get_data(as_text=True))
+
+        main_token = self.login()
+        app_id = self.add(main_token, "Activity", ACTIVITY_LOGIN_URL)
+        path = f"/vault/app/{app_id}/autologin"
+        self.assertFalse(self.card_autologin(app_id))
+        self.assertEqual(self.client.post(path).status_code, 302)  # Vault locked
+        vault_token = self.unlock_vault()
+        self.assertEqual(self.client.get(path).status_code, 405)
+        self.assertEqual(self.client.post(path).status_code, 400)  # separate Vault CSRF
+        self.assertEqual(self.client.post(path, data={"csrf_token": main_token}).status_code, 400)
+        self.assertEqual(self.client.post(path, data={"csrf_token": vault_token}).status_code, 409)
+
+        fields = {"title": "Demo only", "username": "not-a-real-user",
+                  "password": "not-a-real-password", "notes": "throwaway"}
+        form_url = f"/vault/app/{app_id}/credential"
+        self.assertEqual(self.client.post(form_url, data={**fields, "csrf_token": vault_token}).status_code, 302)
+        self.assertEqual(self.client.post(path, data={"csrf_token": vault_token}).status_code, 409)
+        with closing(self.module.get_db()) as db:
+            credential_id = db.execute("SELECT id FROM app_credentials").fetchone()[0]
+
+        update_url = f"/vault/credential/{credential_id}/edit"
+        enabled = self.client.post(update_url, data={
+            **fields, "csrf_token": vault_token, "auto_login": "1",
+        })
+        self.assertEqual(enabled.status_code, 302)
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertTrue(self.card_autologin(app_id))
+        self.assertNotIn("not-a-real-password", html)
+        response = self.client.post(path, data={"csrf_token": vault_token})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        self.assertEqual(response.get_json(), {
+            "ok": True, "login_url": ACTIVITY_LOGIN_URL,
+            "username": fields["username"], "password": fields["password"],
+        })
+        with closing(self.module.get_db()) as db:
+            self.assertEqual(db.execute("SELECT open_count FROM apps WHERE id=?", (app_id,)).fetchone()[0], 1)
+
+        # Changing the card to a lookalike domain must not release its password.
+        impostor = "https://msb-activity.meryosab.com.evil.test/login"
+        self.assertEqual(self.client.post(f"/edit/{app_id}", data={
+            "csrf_token": main_token, "name": "Activity", "target": impostor,
+        }).status_code, 302)
+        self.assertFalse(self.card_autologin(app_id))
+        blocked = self.client.post(path, data={"csrf_token": vault_token})
+        self.assertEqual(blocked.status_code, 409)
+        self.assertNotIn(fields["password"], blocked.get_data(as_text=True))
+
+        self.assertEqual(self.client.post(f"/edit/{app_id}", data={
+            "csrf_token": main_token, "name": "Activity", "target": ACTIVITY_LOGIN_URL,
+        }).status_code, 302)
+        with closing(self.module.get_db()) as db:
+            db.execute("UPDATE app_credentials SET password_enc = 'corrupted' WHERE id = ?", (credential_id,))
+            db.commit()
+        damaged = self.client.post(path, data={"csrf_token": vault_token})
+        self.assertEqual(damaged.status_code, 409)
+        self.assertNotIn(fields["password"], damaged.get_data(as_text=True))
+
+    def test_autologin_selects_only_one_credential_and_rejects_other_sites(self):
+        from vault_control.autologin import ACTIVITY_LOGIN_URL
+
+        main_token = self.login()
+        app_id = self.add(main_token, "Activity", ACTIVITY_LOGIN_URL)
+        wrong_id = self.add(main_token, "Different", "https://example.org/login")
+        vault_token = self.unlock_vault()
+        fields = {"title": "Demo", "username": "fake-user", "password": "fake-password"}
+        wrong = self.client.post(f"/vault/app/{wrong_id}/credential", data={
+            **fields, "auto_login": "1", "csrf_token": vault_token,
+        })
+        self.assertEqual(wrong.status_code, 400)
+        with closing(self.module.get_db()) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM app_credentials WHERE app_id=?", (wrong_id,)).fetchone()[0], 0)
+
+        form = f"/vault/app/{app_id}/credential"
+        self.assertEqual(self.client.post(form, data={
+            "title": "Empty", "username": "fake-user", "auto_login": "1",
+            "csrf_token": vault_token,
+        }).status_code, 400)
+        first = self.client.post(form, data={
+            **fields, "auto_login": "1", "csrf_token": vault_token,
+        })
+        self.assertEqual(first.status_code, 302)
+        second_fields = {**fields, "title": "Other", "username": "fake-other",
+                         "password": "other-fake-password"}
+        second = self.client.post(form, data={
+            **second_fields, "auto_login": "1", "csrf_token": vault_token,
+        })
+        self.assertEqual(second.status_code, 302)
+        with closing(self.module.get_db()) as db:
+            rows = db.execute("SELECT id, auto_login FROM app_credentials ORDER BY id").fetchall()
+            self.assertEqual([row["auto_login"] for row in rows], [0, 1])
+        path = f"/vault/app/{app_id}/autologin"
+        self.assertEqual(self.client.post(path, data={"csrf_token": vault_token}).get_json()["username"], "fake-other")
+        self.assertEqual(self.client.post(f"/vault/credential/{rows[1]['id']}/edit", data={
+            **second_fields, "csrf_token": vault_token,
+        }).status_code, 302)
+        self.assertEqual(self.client.post(path, data={"csrf_token": vault_token}).status_code, 409)
+
+    def test_old_vault_database_migrates_without_enabling_autologin(self):
+        token = self.login()
+        app_id = self.add(token, "Old", "https://msb-activity.meryosab.com/login")
+        with closing(self.module.get_db()) as db:
+            db.execute("DROP TABLE app_credentials")
+            db.execute("""CREATE TABLE app_credentials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, app_id INTEGER NOT NULL,
+                title_enc TEXT NOT NULL DEFAULT '', username_enc TEXT NOT NULL DEFAULT '',
+                password_enc TEXT NOT NULL DEFAULT '', notes_enc TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE)""")
+            db.execute("""INSERT INTO app_credentials(app_id, created_at, updated_at)
+                          VALUES (?, 'old', 'old')""", (app_id,))
+            db.commit()
+        self.init_vault_db()
+        with closing(self.module.get_db()) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(app_credentials)")}
+            self.assertIn("auto_login", columns)
+            self.assertEqual(db.execute("SELECT auto_login FROM app_credentials").fetchone()[0], 0)
+        self.assertFalse(self.card_autologin(app_id))
 
     def test_spoofed_proxy_header_cannot_bypass_ip_allowlist(self):
         from access_control.access_settings import reload_access_config
