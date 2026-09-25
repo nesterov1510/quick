@@ -1,0 +1,4 @@
+Flask>=3.0,<4
+gunicorn>=22,<24; platform_system != "Windows"
+cryptography>=41,<50
+Pillow>=10,<13

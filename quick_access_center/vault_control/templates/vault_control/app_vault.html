@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ app_item.name }} · Password Vault</title>
+    <link rel="stylesheet" href="{{ url_for('vault_control.static', filename='css/vault/vault.css') }}">
+</head>
+<body>
+<div class="vault-page">
+    <header class="vault-header">
+        <div>
+            <a class="brand-link" href="{{ url_for('vault_control.vault_index') }}">← Все интерфейсы</a>
+            <h1>{{ app_item.name }}</h1>
+            <p class="muted">{{ app_item.app_type or 'Без категории' }} · {{ app_item.address or app_item.url }}</p>
+        </div>
+
+        <div class="header-actions">
+            <a class="soft-button" href="{{ url_for('open_app', app_id=app_item.id) }}" target="_blank" rel="noopener">Открыть интерфейс</a>
+            <span class="user-pill">🔐 {{ vault_user }}</span>
+            <form method="post" action="{{ url_for('vault_control.vault_logout') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="danger-button" type="submit">Закрыть</button>
+            </form>
+        </div>
+    </header>
+
+    <div class="flash-area">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div class="alert alert--{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endwith %}
+    </div>
+
+    <div class="vault-layout">
+        <section class="credential-list-panel">
+            <div class="section-head">
+                <div>
+                    <h2>Сохранённые доступы</h2>
+                    <p>{{ credentials|length }} записей</p>
+                </div>
+            </div>
+
+            {% if credentials %}
+                <div class="credential-list">
+                    {% for credential in credentials %}
+                    <article class="credential-card">
+                        <div class="credential-card-head">
+                            <div>
+                                <h3>{{ credential.title }}</h3>
+                                <span>Обновлено: {{ credential.updated_at }}</span>
+                            </div>
+                            <a class="small-button" href="{{ url_for('vault_control.app_vault', app_id=app_item.id, edit=credential.id) }}#credentialForm">Редактировать</a>
+                        </div>
+
+                        <label class="secret-row">
+                            <span>Логин</span>
+                            <div class="copy-row">
+                                <input type="text" value="{{ credential.username }}" readonly autocomplete="off">
+                                <button class="icon-button" type="button" data-copy-value="{{ credential.username|e }}" title="Копировать логин">⧉</button>
+                            </div>
+                        </label>
+
+                        <label class="secret-row">
+                            <span>Пароль</span>
+                            <div class="copy-row">
+                                <input id="password-{{ credential.id }}" type="password" value="{{ credential.password }}" readonly autocomplete="new-password">
+                                <button class="icon-button" type="button" data-toggle-password="#password-{{ credential.id }}" title="Показать пароль">👁</button>
+                                <button class="icon-button" type="button" data-copy-value="{{ credential.password|e }}" title="Копировать пароль">⧉</button>
+                            </div>
+                        </label>
+
+                        {% if credential.notes %}
+                        <div class="credential-notes">
+                            <span>Заметка</span>
+                            <pre>{{ credential.notes }}</pre>
+                        </div>
+                        {% endif %}
+
+                        <form method="post" action="{{ url_for('vault_control.delete_credential', credential_id=credential.id) }}" onsubmit="return confirm('Удалить этот доступ без возможности восстановления?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="delete-link" type="submit">Удалить доступ</button>
+                        </form>
+                    </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">Для этого интерфейса пароли ещё не добавлены.</div>
+            {% endif %}
+        </section>
+
+        <aside class="credential-form-panel" id="credentialForm">
+            <div class="section-head">
+                <div>
+                    <h2>{{ 'Редактировать доступ' if edit_credential else 'Добавить доступ' }}</h2>
+                    <p>Все четыре поля шифруются перед записью в SQLite.</p>
+                </div>
+                {% if edit_credential %}
+                    <a class="small-button" href="{{ url_for('vault_control.app_vault', app_id=app_item.id) }}#credentialForm">Отмена</a>
+                {% endif %}
+            </div>
+
+            <form
+                class="credential-form"
+                method="post"
+                action="{{ url_for('vault_control.update_credential', credential_id=edit_credential.id) if edit_credential else url_for('vault_control.create_credential', app_id=app_item.id) }}"
+                autocomplete="off"
+            >
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+                <label class="field">
+                    <span>Название доступа</span>
+                    <input type="text" name="title" value="{{ edit_credential.title if edit_credential else '' }}" placeholder="Например: Главный администратор" required>
+                </label>
+
+                <label class="field">
+                    <span>Логин</span>
+                    <input type="text" name="username" value="{{ edit_credential.username if edit_credential else '' }}" placeholder="admin@example.com" autocomplete="off">
+                </label>
+
+                <label class="field">
+                    <span>Пароль</span>
+                    <div class="password-wrap">
+                        <input id="credentialPassword" type="password" name="password" value="{{ edit_credential.password if edit_credential else '' }}" placeholder="Пароль интерфейса" autocomplete="new-password">
+                        <button class="icon-button" type="button" data-toggle-password="#credentialPassword">👁</button>
+                    </div>
+                </label>
+
+                <label class="field">
+                    <span>Заметка</span>
+                    <textarea name="notes" placeholder="2FA, резервные коды, назначение аккаунта, дополнительные инструкции...">{{ edit_credential.notes if edit_credential else '' }}</textarea>
+                </label>
+
+                <button class="primary-button full" type="submit">
+                    {{ 'Сохранить изменения' if edit_credential else 'Добавить зашифрованный доступ' }}
+                </button>
+            </form>
+
+            <div class="warning-box">
+                <b>Важно:</b> файл <code>vault_control/vault.env</code> содержит ключ расшифровки.
+                Делайте его закрытый резервный бэкап. Без ключа пароли восстановить невозможно.
+            </div>
+        </aside>
+    </div>
+</div>
+<script src="{{ url_for('vault_control.static', filename='js/vault/vault.js') }}"></script>
+</body>
+</html>

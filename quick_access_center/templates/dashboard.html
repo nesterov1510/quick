@@ -1,0 +1,1743 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>MSB Quick Access</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+
+        :root {
+            --bg: #14161c;
+            --surface: #1a1d24;
+            --surface-2: #12141a;
+            --surface-3: #20232b;
+            --border: rgba(255,255,255,0.07);
+            --border-strong: rgba(255,255,255,0.14);
+            --text: #b7bbc5;
+            --text-dim: #868c98;
+            --text-faint: #565b66;
+            --heading: #d9dce3;
+
+            --accent: #6d93da;
+            --accent-dim: rgba(109,147,218,0.14);
+            --accent-text: #9cb6e6;
+            --on-accent: #0b1220;
+
+            --success: #3fb950;
+            --success-dim: rgba(63,185,80,0.14);
+            --success-text: #6fdb84;
+
+            --danger: #f0605a;
+            --danger-dim: rgba(240,96,90,0.14);
+            --danger-text: #ff8f88;
+
+            --warning: #d29922;
+            --warning-dim: rgba(210,153,34,0.14);
+            --warning-text: #ecb84a;
+
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+            --radius-xl: 10px;
+            --shadow-card: 0 1px 0 rgba(255,255,255,0.02) inset, 0 10px 22px rgba(0,0,0,0.26);
+            --shadow-pop: 0 20px 48px rgba(0,0,0,0.5);
+            --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            min-height: 100vh;
+            font-family: var(--font);
+            color: var(--text);
+            background: var(--bg);
+            font-size: 14px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        button,
+        input,
+        textarea {
+            font-family: inherit;
+        }
+
+        .page {
+            width: min(1440px, calc(100% - 28px));
+            margin: 0 auto;
+            padding: 20px 0 32px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-md);
+            display: grid;
+            place-items: center;
+            background: var(--surface-3);
+            border: 1px solid var(--border-strong);
+            font-size: 18px;
+            flex: 0 0 auto;
+        }
+
+        .title {
+            font-size: 19px;
+            font-weight: 600;
+            line-height: 1;
+            color: var(--heading);
+            letter-spacing: -0.005em;
+        }
+
+        .sub {
+            color: var(--text-faint);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: .07em;
+            margin-top: 5px;
+        }
+
+        .top-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .stats {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .logout-form {
+            margin: 0;
+        }
+
+        .vault-top-btn {
+            min-height: 36px;
+            padding: 8px 13px;
+            border-color: rgba(123,159,227,.34);
+            color: var(--accent-text);
+            background: var(--accent-dim);
+        }
+
+        .vault-top-btn:hover {
+            filter: brightness(1.12);
+        }
+
+        .logout-btn {
+            min-height: 36px;
+            padding: 8px 13px;
+            border-color: rgba(240,96,90,.28);
+            color: var(--danger-text);
+        }
+
+        .logout-btn:hover {
+            background: var(--danger-dim);
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            font-size: 12px;
+        }
+
+        .pill b {
+            color: var(--heading);
+            font-size: 13.5px;
+            font-weight: 700;
+        }
+
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .dot.total {
+            background: var(--text-faint);
+        }
+
+        .dot.ok {
+            background: var(--success);
+        }
+
+        .dot.bad {
+            background: var(--danger);
+        }
+
+        .control-bar {
+            position: relative;
+            margin-bottom: 16px;
+            padding: 14px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-card);
+        }
+
+        .control-bar__row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        /* Кнопка "Добавить блок" всегда остаётся на своём месте в строке -
+           открытие/закрытие панели не двигает саму кнопку и не ломает строку. */
+        .add-panel {
+            flex: 0 0 auto;
+            margin-left: auto;
+            position: static;
+        }
+
+        .add-panel__summary {
+            cursor: pointer;
+            list-style: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 9px 14px;
+            border-radius: var(--radius-sm);
+            background: var(--accent-dim);
+            border: 1px solid var(--accent);
+            color: var(--accent-text);
+            font-size: 13px;
+            font-weight: 600;
+            user-select: none;
+        }
+
+        .add-panel__summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .add-panel__summary:hover {
+            filter: brightness(1.1);
+        }
+
+        .add-panel__label-open {
+            display: none;
+        }
+
+        .add-panel[open] .add-panel__label-closed {
+            display: none;
+        }
+
+        .add-panel[open] .add-panel__label-open {
+            display: inline;
+        }
+
+        /* Сама форма при открытии не толкает соседей и не сдвигает кнопку -
+           она "всплывает" поверх остального контента тем же размером,
+           каким была раньше (на всю ширину панели поиска/категории). */
+        .add-panel[open] > .toolbar {
+            position: absolute;
+            top: calc(100% + 10px);
+            left: 14px;
+            right: 14px;
+            z-index: 40;
+            margin: 0;
+            padding: 14px;
+            background: var(--surface);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-pop);
+        }
+
+        .toolbar {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr .8fr 1.5fr 135px 92px 112px;
+            gap: 10px;
+        }
+
+        .toolbar-extra {
+            grid-column: 1 / -1;
+            border: 1px solid var(--border);
+            background: var(--surface-2);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+
+        .toolbar-extra summary {
+            cursor: pointer;
+            color: var(--text-dim);
+            font-size: 12px;
+            font-weight: 600;
+            padding: 11px 14px;
+            user-select: none;
+        }
+
+        .toolbar-extra summary:hover {
+            color: var(--text);
+        }
+
+        .toolbar-extra[open] summary {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .toolbar-code {
+            width: 100%;
+            min-height: 190px;
+            resize: vertical;
+            border: 0;
+            outline: 0;
+            background: var(--surface-2);
+            color: var(--text);
+            padding: 13px 14px;
+            font-family: var(--mono);
+            font-size: 11.5px;
+            line-height: 1.55;
+            tab-size: 4;
+        }
+
+        .toolbar-code::placeholder {
+            color: var(--text-faint);
+        }
+
+        .searchbar {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 10px;
+            flex: 1 1 320px;
+        }
+
+        .categorybar {
+            display: grid;
+            grid-template-columns: auto minmax(160px, 260px) 1fr;
+            align-items: center;
+            gap: 10px;
+            flex: 1 1 360px;
+        }
+
+        .category-label {
+            color: var(--text-dim);
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .category-select {
+            width: 100%;
+            min-width: 0;
+            border: 1px solid var(--border);
+            background-color: var(--surface-2);
+            color: var(--text);
+            border-radius: var(--radius-sm);
+            padding: 10px 34px 10px 12px;
+            outline: none;
+            font-size: 13px;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image:
+                linear-gradient(45deg, transparent 50%, var(--text-faint) 50%),
+                linear-gradient(135deg, var(--text-faint) 50%, transparent 50%);
+            background-position:
+                calc(100% - 17px) center,
+                calc(100% - 12px) center;
+            background-size: 5px 5px, 5px 5px;
+            background-repeat: no-repeat;
+            transition: border-color .1s ease;
+        }
+
+        .category-select:hover {
+            border-color: var(--border-strong);
+        }
+
+        .category-select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-dim);
+        }
+
+        .category-result {
+            justify-self: end;
+            color: var(--text-faint);
+            font-size: 12px;
+            text-align: right;
+        }
+
+        .category-result b {
+            color: var(--heading);
+        }
+
+        .input {
+            border: 1px solid var(--border);
+            background: var(--surface-2);
+            color: var(--text);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            outline: none;
+            min-width: 0;
+            font-size: 13px;
+            transition: border-color .1s ease;
+        }
+
+        .input::placeholder {
+            color: var(--text-faint);
+        }
+
+        .input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-dim);
+        }
+
+        .file-upload {
+            position: relative;
+            min-width: 0;
+            height: 39px;
+        }
+
+        .file-upload input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        .file-label {
+            height: 39px;
+            border: 1px dashed var(--border-strong);
+            background: var(--surface-2);
+            color: var(--text-dim);
+            border-radius: var(--radius-sm);
+            padding: 10px 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: border-color .1s ease, background .1s ease;
+        }
+
+        .file-upload:hover .file-label {
+            border-color: var(--accent);
+            background: var(--surface-3);
+        }
+
+        .btn {
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            padding: 10px 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 13px;
+            white-space: nowrap;
+            color: var(--text-dim);
+            background: var(--surface-2);
+            transition: background .1s ease, border-color .1s ease, color .1s ease, filter .1s ease, opacity .1s ease;
+            user-select: none;
+            min-height: 39px;
+        }
+
+        .btn:hover {
+            background: var(--surface-3);
+            color: var(--text);
+        }
+
+        .btn:disabled {
+            cursor: not-allowed;
+            opacity: .48;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--on-accent);
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            filter: brightness(1.06);
+        }
+
+        .btn-soft {
+            background: var(--surface-2);
+            border-color: var(--border-strong);
+            color: var(--text-dim);
+        }
+
+        .btn-danger {
+            background: var(--danger-dim);
+            border-color: rgba(240,96,90,.34);
+            color: var(--danger-text);
+        }
+
+        .btn-danger:hover {
+            filter: brightness(1.15);
+        }
+
+        .btn-green {
+            background: var(--success-dim);
+            border-color: rgba(63,185,80,.34);
+            color: var(--success-text);
+        }
+
+        .btn-green:hover {
+            filter: brightness(1.15);
+        }
+
+        .btn.active {
+            background: var(--warning-dim);
+            color: var(--warning-text);
+            border-color: rgba(210,153,34,.36);
+        }
+
+        .toast-area {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .toast {
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 12.5px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+        }
+
+        .toast.success {
+            color: var(--success-text);
+            background: var(--success-dim);
+            border-color: rgba(63,185,80,.3);
+        }
+
+        .toast.error {
+            color: var(--danger-text);
+            background: var(--danger-dim);
+            border-color: rgba(240,96,90,.32);
+        }
+
+        .desktop-state {
+            display: none;
+            margin: 0 0 12px;
+            padding: 10px 13px;
+            border-radius: var(--radius-md);
+            background: var(--warning-dim);
+            color: var(--warning-text);
+            border: 1px solid rgba(210,153,34,.3);
+            font-size: 13px;
+        }
+
+        body.reorder-mode .desktop-state {
+            display: block;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
+            gap: 14px;
+            align-items: start;
+        }
+
+        .mini-card {
+            width: 100%;
+            height: 268px;
+            min-height: 268px;
+            max-height: 268px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border);
+            background: var(--surface);
+            padding: 12px;
+            display: grid;
+            grid-template-rows: 112px 80px 30px;
+            gap: 10px;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+            transition: border-color .12s ease, background .12s ease;
+        }
+
+        .mini-card:hover {
+            border-color: var(--border-strong);
+            background: var(--surface-3);
+        }
+
+        .mini-card::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            height: 3px;
+            background: var(--danger);
+            z-index: 5;
+        }
+
+        .mini-card.active::before {
+            background: var(--success);
+        }
+
+        .mini-media {
+            width: 100%;
+            height: 112px;
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            display: grid;
+            place-items: center;
+            position: relative;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+        }
+
+        .mini-media img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .mini-letter {
+            width: 52px;
+            height: 52px;
+            border-radius: var(--radius-md);
+            display: grid;
+            place-items: center;
+            background: var(--accent-dim);
+            border: 1px solid var(--border-strong);
+            color: var(--accent-text);
+            font-weight: 700;
+            font-size: 22px;
+        }
+
+        .mini-body {
+            min-width: 0;
+            display: grid;
+            grid-template-rows: 42px 14px 14px;
+            gap: 5px;
+            overflow: hidden;
+            position: relative;
+            z-index: 4;
+        }
+
+        .mini-name {
+            height: 42px;
+            font-size: 13.5px;
+            line-height: 1.3;
+            font-weight: 600;
+            color: var(--heading);
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .mini-type {
+            height: 16px;
+            max-width: 100%;
+            font-size: 10px;
+            color: var(--text-faint);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .mini-address {
+            max-width: 100%;
+            font-family: var(--mono);
+            font-size: 10px;
+            line-height: 1.2;
+            color: var(--text-dim);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .mini-footer {
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            overflow: visible;
+            position: relative;
+            z-index: 4;
+        }
+
+        .mini-status {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: 24px;
+            padding: 5px 8px;
+            border-radius: var(--radius-sm);
+            background: var(--danger-dim);
+            border: 1px solid rgba(240,96,90,.24);
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--danger-text);
+            line-height: 1;
+        }
+
+        .mini-status .s-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--danger);
+            flex: 0 0 auto;
+        }
+
+        .mini-card.active .mini-status {
+            color: var(--success-text);
+            background: var(--success-dim);
+            border-color: rgba(63,185,80,.28);
+        }
+
+        .mini-card.active .s-dot {
+            background: var(--success);
+        }
+
+        .mini-footer-actions {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .mini-info-btn,
+        .mini-vault-btn {
+            min-height: 24px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            padding: 5px 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            background: var(--surface-2);
+            color: var(--text-dim);
+            font-size: 10px;
+            font-weight: 600;
+            line-height: 1;
+            cursor: pointer;
+            transition: background .12s ease, border-color .12s ease, color .12s ease;
+        }
+
+        .mini-info-btn:hover,
+        .mini-vault-btn:hover {
+            background: var(--surface-3);
+            border-color: var(--accent);
+            color: var(--text);
+        }
+
+        .mini-info-btn:focus-visible,
+        .mini-vault-btn:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .drag-mark {
+            color: var(--warning-text);
+            font-size: 14px;
+            opacity: .9;
+            display: none;
+            line-height: 1;
+        }
+
+        body.reorder-mode .drag-mark {
+            display: inline-flex;
+        }
+
+        body.reorder-mode .mini-info-btn,
+        body.reorder-mode .mini-vault-btn {
+            pointer-events: none;
+            opacity: .42;
+        }
+
+        body.reorder-mode .mini-card {
+            cursor: grab;
+            outline: 1px dashed rgba(210,153,34,.4);
+        }
+
+        body.reorder-mode .mini-card:active {
+            cursor: grabbing;
+        }
+
+        .mini-card.dragging {
+            opacity: .42;
+        }
+
+        .mini-card.drop-target {
+            border-color: var(--warning);
+            box-shadow: inset 0 0 0 1px var(--warning);
+        }
+
+        .empty {
+            padding: 36px 18px;
+            text-align: center;
+            color: var(--text-faint);
+            border: 1px dashed var(--border-strong);
+            border-radius: var(--radius-lg);
+            background: var(--surface);
+        }
+
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 30;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            background: rgba(0,0,0,.6);
+        }
+
+        .modal-backdrop.show {
+            display: flex;
+        }
+
+        .modal {
+            width: min(820px, 100%);
+            max-height: calc(100vh - 36px);
+            overflow: auto;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-pop);
+            padding: 22px 24px;
+        }
+
+        .modal-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-title {
+            font-size: 17px;
+            font-weight: 600;
+            line-height: 1.25;
+            word-break: break-word;
+            color: var(--heading);
+        }
+
+        .close {
+            width: 30px;
+            height: 30px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-strong);
+            background: var(--surface-2);
+            color: var(--text-dim);
+            cursor: pointer;
+            flex: 0 0 auto;
+            font-size: 15px;
+        }
+
+        .close:hover {
+            background: var(--surface-3);
+            color: var(--text);
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin: 0 0 16px;
+        }
+
+        .detail-cell {
+            border: 1px solid var(--border);
+            background: var(--surface-2);
+            border-radius: var(--radius-md);
+            padding: 11px 12px;
+            min-width: 0;
+        }
+
+        .detail-cell.full {
+            grid-column: 1 / -1;
+        }
+
+        .detail-label {
+            font-size: 10px;
+            color: var(--text-faint);
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .detail-value {
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--text);
+            word-break: break-word;
+            white-space: pre-wrap;
+        }
+
+        .detail-value.ok {
+            color: var(--success-text);
+        }
+
+        .detail-value.bad {
+            color: var(--danger-text);
+        }
+
+        .detail-label-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 7px;
+        }
+
+        .detail-label-row .detail-label {
+            margin-bottom: 0;
+        }
+
+        .detail-code {
+            max-height: 360px;
+            overflow: auto;
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--surface);
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            line-height: 1.55;
+            tab-size: 4;
+        }
+
+        .copy-command-btn {
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            background: var(--surface-2);
+            color: var(--text-dim);
+            padding: 6px 10px;
+            font-size: 10.5px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .copy-command-btn:hover {
+            background: var(--surface-3);
+            color: var(--text);
+        }
+
+        .copy-command-btn[hidden] {
+            display: none;
+        }
+
+        .modal-actions {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr 1fr 1fr;
+            gap: 8px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        @media (max-width: 1180px) {
+            .toolbar {
+                grid-template-columns: 1fr 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .toolbar {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .control-bar__row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .searchbar,
+            .categorybar {
+                grid-template-columns: 1fr;
+            }
+
+            .category-result {
+                justify-self: start;
+                text-align: left;
+            }
+
+            .grid {
+                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                gap: 10px;
+            }
+
+            .modal-actions {
+                grid-template-columns: 1fr;
+            }
+
+            .detail-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .detail-cell.full {
+                grid-column: auto;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .page {
+                width: calc(100% - 20px);
+                padding: 14px 0 24px;
+            }
+
+            .top {
+                align-items: flex-start;
+            }
+
+            .title {
+                font-size: 17px;
+            }
+
+            .stats {
+                width: 100%;
+            }
+
+            .pill {
+                flex: 1 1 auto;
+                justify-content: center;
+            }
+
+            .add-panel__summary {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .toolbar {
+                grid-template-columns: 1fr;
+            }
+
+            .mini-name {
+                font-size: 12.5px;
+            }
+        }
+
+        @media (max-width: 380px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        </style>
+</head>
+
+<body>
+<div class="page">
+    <header class="top">
+        <div class="brand">
+            <div class="logo">⚡</div>
+            <div>
+                <div class="title">MSB Quick Access</div>
+                <div class="sub">Панель быстрого доступа</div>
+            </div>
+        </div>
+
+        <div class="top-actions">
+            <div class="stats">
+                <div class="pill"><span class="dot total"></span><b>{{ total_apps }}</b> всего</div>
+                <div class="pill"><span class="dot ok"></span><b>{{ active_apps }}</b> online</div>
+                <div class="pill"><span class="dot bad"></span><b>{{ inactive_apps }}</b> offline</div>
+            </div>
+
+            <a class="btn vault-top-btn" href="/vault/">🔐 Пароли</a>
+
+            <form class="logout-form" method="POST" action="{{ url_for('access_control.access_logout_route') }}">
+                <input type="hidden" name="csrf_token" value="{{ main_csrf_token }}">
+                <button class="btn btn-soft logout-btn" type="submit">⎋ Выйти</button>
+            </form>
+        </div>
+    </header>
+
+
+
+    <div class="control-bar">
+        <div class="control-bar__row">
+            <form class="searchbar" method="GET" action="{{ url_for('dashboard') }}">
+                <input type="hidden" name="category" value="{{ selected_category }}">
+                <input class="input" type="text" name="search" placeholder="Поиск по названию, IP, категории, справочнику" value="{{ search }}">
+                <button class="btn btn-soft" type="submit">🔍 Найти</button>
+                {% if search %}
+                <a class="btn btn-soft" href="{{ url_for('dashboard', category=selected_category) }}">✕ Сброс</a>
+                {% endif %}
+            </form>
+
+            <form class="categorybar" id="categoryForm" method="GET" action="{{ url_for('dashboard') }}">
+                {% if search %}
+                <input type="hidden" name="search" value="{{ search }}">
+                {% endif %}
+
+                <label class="category-label" for="categorySelect">Показать категорию</label>
+
+                <select class="category-select" id="categorySelect" name="category">
+                    {% for category in categories %}
+                    <option
+                        value="{{ category.value }}"
+                        {% if category.value == selected_category %}selected{% endif %}
+                    >{{ category.label }} ({{ category.count }})</option>
+                    {% endfor %}
+                </select>
+
+                <div class="category-result">
+                    Сейчас показано: <b>{{ apps|length }}</b> карточек
+                </div>
+            </form>
+
+            <details class="add-panel">
+                <summary class="add-panel__summary"><span class="add-panel__label-closed">＋ Добавить блок</span><span class="add-panel__label-open">✕ Закрыть</span></summary>
+                <form class="toolbar" method="POST" action="{{ url_for('add_app') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ main_csrf_token }}">
+                    <input class="input" type="text" name="name" placeholder="Название" required>
+                    <input class="input" type="text" name="target" placeholder="IP:порт или ссылка" required>
+                    <input class="input" type="text" name="app_type" placeholder="Тип / категория">
+                    <input class="input" type="text" name="description" placeholder="Справочник / описание">
+
+                    <label class="file-upload">
+                        <span class="file-label">🖼 Изображение</span>
+                        <input type="file" name="image" accept="image/png,image/jpeg,image/webp,image/gif">
+                    </label>
+
+                    <button class="btn btn-primary" type="submit">＋ Добавить</button>
+                    <button
+                        class="btn btn-soft"
+                        type="button"
+                        id="reorderBtn"
+                        {% if apps|length < 2 %}disabled{% endif %}
+                    >↕ Переставить</button>
+
+                    <details class="toolbar-extra">
+                        <summary>⚙ Запуск системы / команды — необязательно</summary>
+                        <textarea
+                            class="toolbar-code"
+                            name="launch_info"
+                            spellcheck="false"
+                            placeholder="Команды установки, systemd service, запуск, перезапуск, остановка и просмотр логов..."
+                        ></textarea>
+                    </details>
+                </form>
+            </details>
+        </div>
+    </div>
+
+
+    <div class="desktop-state" id="desktopState">
+        Режим перестановки включён. Перетащи блок мышкой — порядок сохранится автоматически.
+    </div>
+
+    <div class="toast-area" id="toastArea">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="toast {{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+    </div>
+
+    {% if apps %}
+    <div class="grid" id="cardsGrid">
+        {% for item in apps %}
+        <div
+            class="mini-card {{ 'active' if item.status == 'active' else 'offline' }}"
+            draggable="false"
+            role="link"
+            tabindex="0"
+            aria-label="Открыть {{ item.name }}"
+            title="Открыть {{ item.name }}"
+            data-id="{{ item.id }}"
+            data-name="{{ item.name|e }}"
+            data-status="{{ item.status|e }}"
+            data-url="{{ item.url|e }}"
+            data-address="{{ item.address|e }}"
+            data-host="{{ item.ping_host|e }}"
+            data-result="{{ item.ping_result|e }}"
+            data-checked="{{ item.last_checked|e }}"
+            data-open-count="{{ item.open_count }}"
+            data-type="{{ item.app_type|e }}"
+            data-description="{{ item.description|e }}"
+            data-image="{{ item.image_filename|e }}"
+        >
+            <textarea class="mini-launch-info" hidden aria-hidden="true">{{ item.launch_info or '' }}</textarea>
+
+            <div class="mini-media">
+                {% if item.image_filename %}
+                    <img src="{{ url_for('block_image', filename=item.image_filename) }}" alt="{{ item.name }}">
+                {% else %}
+                    <span class="mini-letter">{{ item.name[:1]|upper }}</span>
+                {% endif %}
+            </div>
+
+            <div class="mini-body">
+                <div class="mini-name" title="{{ item.name }}">{{ item.name }}</div>
+
+                <div class="mini-type" title="{{ item.app_type or 'Без категории' }}">
+                    {{ item.app_type or 'Без категории' }}
+                </div>
+
+                <div class="mini-address" title="{{ item.address or item.url }}">
+                    {{ item.address or item.url }}
+                </div>
+            </div>
+
+            <div class="mini-footer">
+                <div class="mini-status">
+                    <span class="s-dot"></span>{{ 'ONLINE' if item.status == 'active' else 'OFFLINE' }}
+                </div>
+
+                <div class="mini-footer-actions">
+                    <button
+                        class="mini-info-btn"
+                        type="button"
+                        aria-label="Информация и редактирование: {{ item.name }}"
+                        title="Информация и редактирование"
+                    >ⓘ Инфо</button>
+                    <a
+                        class="mini-vault-btn"
+                        href="/vault/app/{{ item.id }}"
+                        aria-label="Отдельные логины и пароли: {{ item.name }}"
+                        title="Логины и пароли"
+                    >🔐</a>
+                    <div class="drag-mark" aria-hidden="true">↕</div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">В выбранной категории карточек пока нет</div>
+    {% endif %}
+</div>
+
+<div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal">
+        <div class="modal-head">
+            <div>
+                <div class="modal-title" id="modalTitle">—</div>
+                <div class="mini-status" id="modalStatus" style="margin-top:8px;">
+                    <span class="s-dot"></span>OFFLINE
+                </div>
+            </div>
+
+            <button class="close" type="button" id="modalClose">✕</button>
+        </div>
+
+        <div class="detail-grid">
+            <div class="detail-cell full">
+                <div class="detail-label">Адрес</div>
+                <div class="detail-value" id="modalAddress">—</div>
+            </div>
+
+            <div class="detail-cell full">
+                <div class="detail-label">URL</div>
+                <div class="detail-value" id="modalUrl">—</div>
+            </div>
+
+            <div class="detail-cell">
+                <div class="detail-label">Тип / категория</div>
+                <div class="detail-value" id="modalType">—</div>
+            </div>
+
+            <div class="detail-cell">
+                <div class="detail-label">Проверка</div>
+                <div class="detail-value" id="modalResult">—</div>
+            </div>
+
+            <div class="detail-cell">
+                <div class="detail-label">Host</div>
+                <div class="detail-value" id="modalHost">—</div>
+            </div>
+
+            <div class="detail-cell">
+                <div class="detail-label">Открытий</div>
+                <div class="detail-value" id="modalOpenCount">0</div>
+            </div>
+
+            <div class="detail-cell full">
+                <div class="detail-label">Последняя проверка</div>
+                <div class="detail-value" id="modalChecked">—</div>
+            </div>
+
+            <div class="detail-cell full">
+                <div class="detail-label">Справочник / описание</div>
+                <div class="detail-value" id="modalDescription">—</div>
+            </div>
+
+            <div class="detail-cell full">
+                <div class="detail-label-row">
+                    <div class="detail-label">Запуск системы / команды</div>
+                    <button class="copy-command-btn" type="button" id="copyLaunchInfoBtn" hidden>⧉ Копировать</button>
+                </div>
+                <div class="detail-value detail-code" id="modalLaunchInfo">—</div>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <a class="btn btn-primary" id="modalEdit" href="#">✎ Редактировать</a>
+            <a class="btn btn-green" id="modalOpen" href="#" target="_blank">↗ Открыть</a>
+            <a class="btn btn-soft" id="modalVault" href="#">🔐 Пароли</a>
+
+            <form method="POST" id="modalDeleteForm" onsubmit="return confirm('Удалить этот блок?')">
+                <input type="hidden" name="csrf_token" value="{{ main_csrf_token }}">
+                <button class="btn btn-danger" type="submit" style="width:100%;">✕ Удалить</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const body = document.body;
+    const grid = document.getElementById('cardsGrid');
+    const reorderBtn = document.getElementById('reorderBtn');
+    const toastArea = document.getElementById('toastArea');
+    const modal = document.getElementById('modalBackdrop');
+    const modalClose = document.getElementById('modalClose');
+    const copyLaunchInfoBtn = document.getElementById('copyLaunchInfoBtn');
+    const categoryForm = document.getElementById('categoryForm');
+    const categorySelect = document.getElementById('categorySelect');
+    const selectedCategory = {{ selected_category|tojson }};
+    const mainCsrfToken = {{ main_csrf_token|tojson }};
+    const vaultAppUrlTemplate = '/vault/app/0';
+
+    let reorderMode = false;
+    let dragged = null;
+    let dragMoved = false;
+    let reorderDirty = false;
+    let saveQueue = Promise.resolve();
+    let currentLaunchInfo = '';
+
+    function toast(text, type = 'success') {
+        if (!toastArea) return;
+
+        const el = document.createElement('div');
+        el.className = 'toast ' + type;
+        el.textContent = text;
+        toastArea.prepend(el);
+
+        setTimeout(() => {
+            el.remove();
+        }, 2600);
+    }
+
+    function getCardIds() {
+        if (!grid) return [];
+
+        return Array.from(grid.querySelectorAll('.mini-card'))
+            .map(card => card.dataset.id)
+            .filter(Boolean);
+    }
+
+    function setReorderMode(enabled) {
+        if (enabled && getCardIds().length < 2) {
+            toast('Для перестановки нужно минимум две карточки', 'error');
+            return;
+        }
+
+        reorderMode = enabled;
+        body.classList.toggle('reorder-mode', enabled);
+
+        if (reorderBtn) {
+            reorderBtn.classList.toggle('active', enabled);
+            reorderBtn.textContent = enabled ? '✓ Готово' : '↕ Переставить';
+        }
+
+        document.querySelectorAll('.mini-card').forEach(card => {
+            card.draggable = enabled;
+        });
+    }
+
+    function delay(milliseconds) {
+        return new Promise(resolve => setTimeout(resolve, milliseconds));
+    }
+
+    async function persistOrder(ids, showToast = true) {
+        if (!ids.length) return true;
+
+        if (reorderBtn) {
+            reorderBtn.disabled = true;
+            reorderBtn.textContent = 'Сохраняю…';
+        }
+
+        try {
+            let lastError = null;
+
+            for (let attempt = 1; attempt <= 3; attempt += 1) {
+                try {
+                    const response = await fetch('{{ url_for("reorder_apps") }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-Token': mainCsrfToken
+                        },
+                        body: JSON.stringify({
+                            ids: ids,
+                            category: selectedCategory
+                        })
+                    });
+
+                    let data = null;
+                    try {
+                        data = await response.json();
+                    } catch (parseError) {
+                        data = null;
+                    }
+
+                    if (
+                        (response.status === 401 || response.status === 403)
+                        && data
+                        && data.login_url
+                    ) {
+                        window.location.assign(data.login_url);
+                        return false;
+                    }
+
+                    if (response.status === 503 && attempt < 3) {
+                        await delay(250 * attempt);
+                        continue;
+                    }
+
+                    if (!response.ok || !data || data.ok !== true) {
+                        const errorCode = data && data.error ? data.error : 'bad response';
+                        throw new Error(errorCode);
+                    }
+
+                    if (getCardIds().join(',') === ids.join(',')) {
+                        reorderDirty = false;
+                    }
+
+                    if (showToast) {
+                        toast('Порядок сохранён');
+                    }
+
+                    return true;
+                } catch (error) {
+                    lastError = error;
+
+                    if (attempt < 3) {
+                        await delay(250 * attempt);
+                    }
+                }
+            }
+
+            throw lastError || new Error('save failed');
+        } catch (error) {
+            reorderDirty = true;
+            toast('Порядок не сохранился. Нажми «Готово» ещё раз', 'error');
+            return false;
+        } finally {
+            if (reorderBtn) {
+                reorderBtn.disabled = getCardIds().length < 2;
+                reorderBtn.textContent = reorderMode ? '✓ Готово' : '↕ Переставить';
+            }
+        }
+    }
+
+    function queueSaveOrder(showToast = true) {
+        const ids = getCardIds();
+
+        saveQueue = saveQueue
+            .catch(() => false)
+            .then(() => persistOrder(ids, showToast));
+
+        return saveQueue;
+    }
+
+    function setText(id, value, fallback = '—') {
+        const el = document.getElementById(id);
+        if (!el) return;
+
+        el.textContent = value || fallback;
+    }
+
+    function openModal(card) {
+        if (reorderMode) return;
+
+        const isActive = card.dataset.status === 'active';
+
+        setText('modalTitle', card.dataset.name);
+        setText('modalAddress', card.dataset.address);
+        setText('modalUrl', card.dataset.url);
+        setText('modalHost', card.dataset.host);
+        setText('modalResult', card.dataset.result);
+        setText('modalChecked', card.dataset.checked);
+        setText('modalOpenCount', card.dataset.openCount || '0');
+        setText('modalType', card.dataset.type || 'Без категории');
+        setText('modalDescription', card.dataset.description || '—');
+
+        const launchInfoField = card.querySelector('.mini-launch-info');
+        currentLaunchInfo = launchInfoField ? launchInfoField.value.trim() : '';
+        setText('modalLaunchInfo', currentLaunchInfo || 'Команды запуска пока не добавлены');
+
+        if (copyLaunchInfoBtn) {
+            copyLaunchInfoBtn.hidden = !currentLaunchInfo;
+            copyLaunchInfoBtn.textContent = '⧉ Копировать';
+        }
+
+        const status = document.getElementById('modalStatus');
+        if (status) {
+            status.innerHTML = '<span class="s-dot"></span>' + (isActive ? 'ONLINE' : 'OFFLINE');
+            status.style.color = isActive ? '#78ffc0' : '#ff9cad';
+        }
+
+        const id = card.dataset.id;
+        const modalOpen = document.getElementById('modalOpen');
+        const modalEdit = document.getElementById('modalEdit');
+        const modalVault = document.getElementById('modalVault');
+        const modalDeleteForm = document.getElementById('modalDeleteForm');
+
+        if (modalOpen) modalOpen.href = '/open/' + id;
+        if (modalEdit) modalEdit.href = '/edit/' + id;
+        if (modalVault) modalVault.href = vaultAppUrlTemplate.replace(/0$/, id);
+        if (modalDeleteForm) modalDeleteForm.action = '/delete/' + id;
+
+        modal.classList.add('show');
+    }
+
+    async function copyLaunchInfo() {
+        if (!currentLaunchInfo) return;
+
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(currentLaunchInfo);
+            } else {
+                const temp = document.createElement('textarea');
+                temp.value = currentLaunchInfo;
+                temp.style.position = 'fixed';
+                temp.style.opacity = '0';
+                document.body.appendChild(temp);
+                temp.focus();
+                temp.select();
+                document.execCommand('copy');
+                temp.remove();
+            }
+
+            if (copyLaunchInfoBtn) {
+                copyLaunchInfoBtn.textContent = '✓ Скопировано';
+                setTimeout(() => {
+                    copyLaunchInfoBtn.textContent = '⧉ Копировать';
+                }, 1600);
+            }
+        } catch (error) {
+            toast('Не удалось скопировать команды', 'error');
+        }
+    }
+
+    if (categorySelect && categoryForm) {
+        categorySelect.addEventListener('change', () => {
+            // ВАЖНО: select нельзя отключать перед submit.
+            // Disabled-поле браузер не отправляет, поэтому category пропадала из GET.
+            categorySelect.setAttribute('aria-busy', 'true');
+            categorySelect.style.pointerEvents = 'none';
+            categoryForm.submit();
+        });
+    }
+
+    if (copyLaunchInfoBtn) {
+        copyLaunchInfoBtn.addEventListener('click', copyLaunchInfo);
+    }
+
+    if (reorderBtn) {
+        reorderBtn.addEventListener('click', async () => {
+            const nextState = !reorderMode;
+
+            if (!nextState && reorderDirty) {
+                await queueSaveOrder(true);
+            }
+
+            setReorderMode(nextState);
+        });
+    }
+
+    if (grid) {
+        grid.addEventListener('dragover', event => {
+            if (!reorderMode || !dragged) return;
+            event.preventDefault();
+        });
+
+        grid.addEventListener('drop', event => {
+            if (!reorderMode) return;
+            event.preventDefault();
+        });
+    }
+
+    document.querySelectorAll('.mini-card').forEach(card => {
+        const infoButton = card.querySelector('.mini-info-btn');
+
+        if (infoButton) {
+            infoButton.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                openModal(card);
+            });
+        }
+
+        card.addEventListener('click', event => {
+            if (reorderMode) return;
+            if (event.target.closest('button, a, input, textarea, select, form')) return;
+
+            window.open('/open/' + card.dataset.id, '_blank', 'noopener');
+        });
+
+        card.addEventListener('keydown', event => {
+            if (reorderMode) return;
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            if (event.target.closest('button, a, input, textarea, select, form')) return;
+
+            event.preventDefault();
+            window.open('/open/' + card.dataset.id, '_blank', 'noopener');
+        });
+
+        card.addEventListener('dragstart', event => {
+            if (!reorderMode) {
+                event.preventDefault();
+                return;
+            }
+
+            dragged = card;
+            dragMoved = false;
+            card.classList.add('dragging');
+
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', card.dataset.id || '');
+            }
+        });
+
+        card.addEventListener('dragend', async () => {
+            card.classList.remove('dragging');
+
+            document.querySelectorAll('.mini-card').forEach(item => {
+                item.classList.remove('drop-target');
+            });
+
+            dragged = null;
+
+            if (dragMoved) {
+                reorderDirty = true;
+                await queueSaveOrder(true);
+            }
+
+            dragMoved = false;
+        });
+
+        card.addEventListener('dragover', event => {
+            if (!reorderMode || !dragged || dragged === card) return;
+
+            event.preventDefault();
+            card.classList.add('drop-target');
+
+            const beforeOrder = getCardIds().join(',');
+            const box = card.getBoundingClientRect();
+            const relativeX = event.clientX - box.left;
+            const relativeY = event.clientY - box.top;
+
+            let insertAfter;
+            if (relativeY < box.height * 0.35) {
+                insertAfter = false;
+            } else if (relativeY > box.height * 0.65) {
+                insertAfter = true;
+            } else {
+                insertAfter = relativeX > box.width / 2;
+            }
+
+            if (insertAfter) {
+                card.after(dragged);
+            } else {
+                card.before(dragged);
+            }
+
+            if (beforeOrder !== getCardIds().join(',')) {
+                dragMoved = true;
+                reorderDirty = true;
+            }
+        });
+
+        card.addEventListener('dragleave', () => {
+            card.classList.remove('drop-target');
+        });
+
+        card.addEventListener('drop', event => {
+            if (!reorderMode) return;
+            event.preventDefault();
+            event.stopPropagation();
+            card.classList.remove('drop-target');
+        });
+    });
+
+    if (modalClose) {
+        modalClose.addEventListener('click', () => {
+            modal.classList.remove('show');
+        });
+    }
+
+    if (modal) {
+        modal.addEventListener('click', event => {
+            if (event.target === modal) {
+                modal.classList.remove('show');
+            }
+        });
+    }
+
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && modal) {
+            modal.classList.remove('show');
+        }
+    });
+})();
+</script>
+</body>
+</html>

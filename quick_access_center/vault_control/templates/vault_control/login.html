@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Отдельный вход · MSB Password Vault</title>
+    <link rel="stylesheet" href="{{ url_for('vault_control.static', filename='css/vault/vault.css') }}">
+</head>
+<body>
+<div class="vault-page vault-page--center">
+    <section class="login-shell">
+        <div class="login-info">
+            <a class="brand-link" href="{{ url_for('dashboard') }}">← MSB Quick Access</a>
+            <div class="vault-badge">🔐 SECOND AUTH LAYER</div>
+            <h1>Админ-хранилище доступов</h1>
+            <p>
+                Этот раздел имеет отдельный логин и пароль. Логины, пароли и заметки
+                интерфейсов сохраняются в SQLite только в зашифрованном виде.
+            </p>
+
+            <div class="security-points">
+                <div><b>Отдельная авторизация</b><span>Основной вход Quick Access не открывает пароли автоматически.</span></div>
+                <div><b>Шифрование Fernet</b><span>Секретные поля не лежат в базе открытым текстом.</span></div>
+                <div><b>Сессия по активности</b><span>Пока вы работаете, вход сохраняется. Доступ закрывается после {{ vault_session_minutes }} минут бездействия.</span></div>
+            </div>
+        </div>
+
+        <div class="login-card">
+            <div class="login-icon">🔒</div>
+            <h2>Отдельный вход администратора</h2>
+            <p class="muted">Введите данные именно от хранилища паролей.</p>
+
+            {% if error_message %}
+                <div class="alert alert--error">{{ error_message }}</div>
+            {% endif %}
+
+            {% if not vault_configured %}
+                <div class="alert alert--warning">
+                    Хранилище ещё не настроено.<br>
+                    Выполните в корне проекта:<br>
+                    <code>source venv/bin/activate</code><br>
+                    <code>python vault_control/setup_vault.py</code>
+                </div>
+            {% endif %}
+
+            <form method="post" action="{{ url_for('vault_control.vault_login') }}" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="next" value="{{ next_url }}">
+
+                <label class="field">
+                    <span>Отдельный логин</span>
+                    <input
+                        type="text"
+                        name="username"
+                        value="{{ login_value }}"
+                        placeholder="vault-admin"
+                        required
+                        autocomplete="username"
+                        {% if not vault_configured or not vault_ip_allowed %}disabled{% endif %}
+                    >
+                </label>
+
+                <label class="field">
+                    <span>Отдельный пароль</span>
+                    <div class="password-wrap">
+                        <input
+                            id="vaultLoginPassword"
+                            type="password"
+                            name="password"
+                            placeholder="Введите пароль хранилища"
+                            required
+                            autocomplete="current-password"
+                            {% if not vault_configured or not vault_ip_allowed %}disabled{% endif %}
+                        >
+                        <button class="icon-button" type="button" data-toggle-password="#vaultLoginPassword">👁</button>
+                    </div>
+                </label>
+
+                <button class="primary-button full" type="submit" {% if not vault_configured or not vault_ip_allowed %}disabled{% endif %}>
+                    Открыть хранилище
+                </button>
+            </form>
+
+            <div class="login-meta">
+                <span>IP: <b>{{ vault_current_ip }}</b></span>
+                <span>IP-разрешение: <b>{{ 'да' if vault_ip_allowed else 'нет' }}</b></span>
+            </div>
+        </div>
+    </section>
+</div>
+<script src="{{ url_for('vault_control.static', filename='js/vault/vault.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+# Private application state and user data
+*.rar
+**/.env
+**/*.env
+quick_access_center/**/access_attempts.*
+quick_access_center/**/vault_attempts.*
+quick_access_center/access_control/.access.*
+quick_access_center/vault_control/.vault.*
+quick_access_center/data/
+quick_access_center/save_blocks/
+quick_access_center/quick_access.db
+quick_access_center/on_off_debug/log_folder/
+quick_access_center/backups/
+quick_access_center/app_others/paswd.txt
+
+# Local Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.log
