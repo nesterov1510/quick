@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Хранилище паролей · MSB Quick Access</title>
+    <link rel="stylesheet" href="{{ url_for('vault_control.static', filename='css/vault/vault.css') }}">
+</head>
+<body>
+<div class="vault-page">
+    <header class="vault-header">
+        <div>
+            <a class="brand-link" href="{{ url_for('dashboard') }}">← MSB Quick Access</a>
+            <h1>Админ-хранилище паролей</h1>
+            <p class="muted">Выберите интерфейс и управляйте его отдельными доступами.</p>
+        </div>
+
+        <div class="header-actions">
+            <span class="user-pill">🔐 {{ vault_user }}</span>
+            <form method="post" action="{{ url_for('vault_control.vault_logout') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="danger-button" type="submit">Закрыть хранилище</button>
+            </form>
+        </div>
+    </header>
+
+    <form class="vault-search" method="get" action="{{ url_for('vault_control.vault_index') }}">
+        <input type="search" name="search" value="{{ search }}" placeholder="Поиск по названию, адресу или категории">
+        <button class="soft-button" type="submit">Найти</button>
+        {% if search %}<a class="soft-button" href="{{ url_for('vault_control.vault_index') }}">Сбросить</a>{% endif %}
+    </form>
+
+    {% if apps %}
+    <div class="vault-app-grid">
+        {% for item in apps %}
+        <a class="vault-app-card" href="{{ url_for('vault_control.app_vault', app_id=item.id) }}">
+            <div class="vault-app-icon">
+                {% if item.image_filename %}
+                    <img src="{{ url_for('block_image', filename=item.image_filename) }}" alt="{{ item.name }}">
+                {% else %}
+                    <span>{{ item.name[:1]|upper }}</span>
+                {% endif %}
+            </div>
+            <div class="vault-app-body">
+                <h2>{{ item.name }}</h2>
+                <p>{{ item.app_type or 'Без категории' }}</p>
+                <code>{{ item.address or item.url }}</code>
+            </div>
+            <div class="credential-count">
+                <b>{{ item.credential_count }}</b>
+                <span>доступов</span>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+        <div class="empty-state">Интерфейсы не найдены.</div>
+    {% endif %}
+</div>
+<script src="{{ url_for('vault_control.static', filename='js/vault/vault.js') }}"></script>
+</body>
+</html>

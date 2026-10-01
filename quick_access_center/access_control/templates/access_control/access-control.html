@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Вход · MSB Quick Access Center</title>
+    <link rel="stylesheet" href="{{ url_for('access_control.static', filename='css/access/access-control.css') }}">
+</head>
+<body>
+<div class="page">
+    <div class="top-nav">
+        <div class="brand">
+            <div class="brand-mark">MSB</div>
+            <div class="brand-text">
+                <strong>MSB Quick Access Center</strong>
+                <span>Защищённый локальный доступ</span>
+            </div>
+        </div>
+
+        <div class="top-actions">
+            <a class="main-page-link" href="{{ url_for('dashboard') }}">🖥️ Главная</a>
+            <span class="status-pill">
+                {% if is_logged_in %}
+                    <span class="dot on"></span> доступ открыт
+                {% else %}
+                    <span class="dot"></span> требуется вход
+                {% endif %}
+            </span>
+        </div>
+    </div>
+
+    <section class="hero">
+        <div class="hero-info">
+            <div class="hero-content">
+                <div class="eyebrow">🔐 Secure Area</div>
+                <h1>Защищённая панель быстрого доступа</h1>
+                <p>
+                    Вход доступен только авторизованным пользователям.
+                    Основные маршруты Flask-приложения закрыты через серверную проверку.
+                </p>
+            </div>
+
+            <div class="security-list">
+                <div class="security-item">
+                    <div class="security-icon">🔑</div>
+                    <div>
+                        <strong>Hash-пароль</strong>
+                        <span>Пароль проверяется через MAIN_ACCESS_PASSWORD_HASH. Открытый пароль не нужен.</span>
+                    </div>
+                </div>
+
+                <div class="security-item">
+                    <div class="security-icon">🛡</div>
+                    <div>
+                        <strong>IP-контроль</strong>
+                        <span>Доступ разрешается только IP/CIDR из MAIN_ACCESS_ALLOWED_IPS.</span>
+                    </div>
+                </div>
+
+                <div class="security-item">
+                    <div class="security-icon">⏱</div>
+                    <div>
+                        <strong>Anti brute-force</strong>
+                        <span>Неправильные попытки входа ограничиваются по IP и IP+логину.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="access-card">
+            <div class="access-box">
+                {% if system_message %}
+                    <div class="message-box">{{ system_message }}</div>
+                {% endif %}
+
+                {% if error_message %}
+                    <div class="error-box">{{ error_message }}</div>
+                {% endif %}
+
+                {% if is_logged_in %}
+                    <div class="access-head">
+                        <div class="lock-icon">✅</div>
+                        <h2>Доступ открыт</h2>
+                        <p>Можно продолжить работу с приложением.</p>
+                    </div>
+
+                    {% if session_user %}
+                        <p class="session-user">Пользователь: <strong>{{ session_user }}</strong></p>
+                    {% endif %}
+
+                    <div class="session-meta">
+                        <span>IP: <strong>{{ access_current_ip }}</strong></span>
+                        <span>Сессия: <strong>{{ access_session_hours }} ч.</strong></span>
+                    </div>
+
+                    <div class="session-card">
+                        <div class="session-actions">
+                            <a class="btn-link btn-green" href="{{ next_url if next_url else '/' }}">Продолжить</a>
+                            <form method="post" action="{{ url_for('access_control.access_logout_route') }}">
+                                <input type="hidden" name="csrf_token" value="{{ main_csrf_token }}">
+                                <button class="btn-red" type="submit">Выйти</button>
+                            </form>
+                        </div>
+                    </div>
+                {% else %}
+                    <div class="access-head">
+                        <div class="lock-icon">🔒</div>
+                        <h2>Вход в систему</h2>
+                        <p>Введите данные доступа.</p>
+                    </div>
+
+                    <form method="post" action="{{ url_for('access_control.access_login_route') }}" autocomplete="on">
+                        <input type="hidden" name="csrf_token" value="{{ main_csrf_token }}">
+                        <input type="hidden" name="next" value="{{ next_url if next_url else '/' }}">
+
+                        <div class="form-grid">
+                            <div class="field">
+                                <label>Логин</label>
+                                <div class="input-wrap">
+                                    <input
+                                        type="text"
+                                        name="username"
+                                        value="{{ login_value if login_value is defined else '' }}"
+                                        placeholder="Введите логин"
+                                        required
+                                        autocomplete="username"
+                                        autofocus
+                                    >
+                                    <span class="input-icon">👤</span>
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label>Пароль</label>
+                                <div class="input-wrap">
+                                    <input
+                                        id="accessPassword"
+                                        type="password"
+                                        name="password"
+                                        placeholder="Введите пароль"
+                                        required
+                                        autocomplete="current-password"
+                                    >
+                                    <button class="password-toggle" type="button" data-password-toggle title="Показать / скрыть пароль">👁</button>
+                                </div>
+                            </div>
+
+                            <div class="row-options">
+                                <label class="check">
+                                    <input type="checkbox" name="remember" value="1">
+                                    Запомнить вход
+                                </label>
+                            </div>
+
+                            {% if access_ip_allowed is defined and not access_ip_allowed %}
+                                <button class="btn-blue" type="submit" disabled>Доступ запрещён</button>
+                            {% else %}
+                                <button class="btn-blue" type="submit">Войти</button>
+                            {% endif %}
+                        </div>
+                    </form>
+
+                    <div class="access-info">
+                        <span>Ваш IP: <strong>{{ access_current_ip }}</strong></span>
+                        <span>Trust proxy: <strong>{{ access_trust_proxy }}</strong></span>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+</div>
+
+<script src="{{ url_for('access_control.static', filename='js/access/access-control.js') }}"></script>
+</body>
+</html>
