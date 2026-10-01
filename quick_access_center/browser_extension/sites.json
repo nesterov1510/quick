@@ -1,0 +1,23 @@
+{
+  "comment": "Список адресов входа, которым расширение может передать пароль. Адрес обязан совпадать с VAULT_AUTOLOGIN_SITES в vault_control/vault.env (встроенные адреса перечислены в vault_control/autologin.py). Свои дополнительные сервисы можно добавлять в sites.local.json (см. sites.example.json и ADDING_SERVICES.md).",
+  "sites": [
+    {
+      "name": "MSB Activity",
+      "login_url": "https://msb-activity.meryosab.com/login"
+    },
+    {
+      "name": "Repair Partner Service",
+      "login_url": "https://repair-partner-service.meryosab.com/ru/login"
+    },
+    {
+      "name": "MSB Career (админка)",
+      "login_url": "https://msb-career.meryosab.com/admin/login/"
+    },
+    {
+      "name": "Внутренний сервис (192.168.8.81)",
+      "login_url": "http://192.168.8.81:8085/login",
+      "allow_insecure": true,
+      "_comment": "http в локальной сети: работает только при VAULT_AUTOLOGIN_ALLOW_PRIVATE_HTTP=1, пароль идёт по сети открытым текстом."
+    }
+  ]
+}

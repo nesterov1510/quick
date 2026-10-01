@@ -12,6 +12,8 @@ quick_access_center/quick_access.db
 quick_access_center/on_off_debug/log_folder/
 quick_access_center/backups/
 quick_access_center/app_others/paswd.txt
+# Personal auto-login site list (no secrets, but user-specific)
+quick_access_center/browser_extension/sites.local.json
 
 # Local Python environments and generated files
 .venv/

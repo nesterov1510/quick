@@ -21,7 +21,14 @@ from flask import (
     url_for,
 )
 
-from vault_control.autologin import ACTIVITY_LOGIN_URL, is_supported_login_url
+from vault_control.autologin import (
+    canonical_login_url,
+    describe_supported_login_urls,
+    invalid_login_url_entries,
+    is_supported_login_url,
+    private_http_allowed,
+    supported_login_urls,
+)
 from vault_control.vault_settings import (
     clear_failed_logins,
     clear_vault_session,
@@ -366,6 +373,9 @@ def create_vault_blueprint() -> Blueprint:
             search=search,
             csrf_token=get_csrf_token(),
             vault_user=session.get("vault_user", ""),
+            autologin_urls=supported_login_urls(),
+            autologin_invalid=invalid_login_url_entries(),
+            autologin_private_http=private_http_allowed(),
         )
 
     @bp.route("/app/<int:app_id>")
@@ -396,7 +406,7 @@ def create_vault_blueprint() -> Blueprint:
             credentials=credentials,
             edit_credential=edit_credential,
             auto_login_supported=is_supported_login_url(app_item["url"]),
-            auto_login_url=ACTIVITY_LOGIN_URL,
+            auto_login_urls=describe_supported_login_urls(),
             csrf_token=get_csrf_token(),
             vault_user=session.get("vault_user", ""),
         )
@@ -417,6 +427,9 @@ def create_vault_blueprint() -> Blueprint:
                 abort(404)
             if not is_supported_login_url(app_item["url"]):
                 return jsonify({"ok": False, "error": "unsupported_target"}), 409
+            # Canonical form of the card's own allowlisted URL: the extension
+            # opens exactly this page and nothing derived from it.
+            login_url = canonical_login_url(app_item["url"])
 
             row = conn.execute(
                 """SELECT username_enc, password_enc FROM app_credentials
@@ -445,7 +458,7 @@ def create_vault_blueprint() -> Blueprint:
             conn.commit()
             return jsonify({
                 "ok": True,
-                "login_url": ACTIVITY_LOGIN_URL,
+                "login_url": login_url,
                 "username": username,
                 "password": password,
             })

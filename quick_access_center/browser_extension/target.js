@@ -1,19 +1,64 @@
 "use strict";
 
-// Only the real Activity login page receives a one-use credential, and only
-// when opened by clicking an opted-in card in the configured Quick panel.
-(() => {
-  if (window.top !== window || location.origin !== "https://msb-activity.meryosab.com" ||
-      !["/login", "/login/"].includes(location.pathname)) return;
+// Only a login page named by the extension's own allowlist receives a one-use
+// credential, and only when it was opened by clicking an opted-in card in the
+// configured Quick panel. The allowlist stays in the service worker, which
+// answers from sender.url: the page can neither read nor widen it.
+(async () => {
+  if (window.top !== window) return;
+
+  let config;
+  try {
+    config = await chrome.runtime.sendMessage({type: "TARGET_CHECK"});
+  } catch {
+    return;
+  }
+  if (!config?.ok) return;
+
+  function usable(input) {
+    return !!input && !input.disabled && !input.readOnly && !input.hidden;
+  }
+
+  function query(scope, selector) {
+    try {
+      return selector ? scope.querySelector(selector) : null;
+    } catch {
+      return null; // a broken selector in sites.local.json must not throw
+    }
+  }
+
+  function pickPassword() {
+    if (config.password_selector) {
+      const picked = query(document, config.password_selector);
+      return picked && picked.tagName === "INPUT" && picked.type === "password" && usable(picked)
+        ? picked
+        : null; // an explicit selector that does not resolve is never guessed around
+    }
+    const passwords = [...document.querySelectorAll('input[type="password"]')]
+      .filter(input => usable(input));
+    return passwords.length === 1 ? passwords[0] : null;
+  }
+
+  function pickUsername(form, candidates) {
+    if (config.username_selector) {
+      const picked = query(document, config.username_selector);
+      if (!picked || picked.tagName !== "INPUT" || picked.form !== form || !usable(picked)) return null;
+      return ["text", "email", "tel"].includes(picked.type) ? picked : null;
+    }
+    const named = candidates.filter(input =>
+      /^(username|user|login|email|identifier)$/i.test(input.name || input.id || "") ||
+      /^(username|email)$/.test(input.autocomplete || ""));
+    return named.length === 1 ? named[0] : candidates.length === 1 ? candidates[0] : null;
+  }
 
   function loginForm() {
-    const passwords = [...document.querySelectorAll('input[type="password"]')]
-      .filter(input => !input.disabled && !input.readOnly && !input.hidden);
-    if (passwords.length !== 1) return null;
-    const password = passwords[0];
+    const password = pickPassword();
+    if (!password) return null;
     const form = password.form;
     if (!form) return null;
-    const submit = form.querySelector('button[type="submit"], input[type="submit"]');
+    const submit = config.submit_selector
+      ? query(form, config.submit_selector)
+      : form.querySelector('button[type="submit"], input[type="submit"]');
     if (submit?.disabled) return null;
     try {
       // A submit button's formaction/formmethod can override the form. Resolve
@@ -27,12 +72,8 @@
 
     const inputs = [...form.querySelectorAll("input")];
     const candidates = inputs.filter(input =>
-      ["text", "email", "tel"].includes(input.type) &&
-      !input.disabled && !input.readOnly && !input.hidden);
-    const named = candidates.filter(input =>
-      /^(username|user|login|email|identifier)$/i.test(input.name || input.id || "") ||
-      /^(username|email)$/.test(input.autocomplete || ""));
-    const username = named.length === 1 ? named[0] : candidates.length === 1 ? candidates[0] : null;
+      ["text", "email", "tel"].includes(input.type) && usable(input));
+    const username = pickUsername(form, candidates);
     if (!username) return null;
     return {form, username, password, submit};
   }
