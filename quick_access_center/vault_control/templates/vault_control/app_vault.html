@@ -139,10 +139,10 @@
                 <label class="auto-login-option">
                     <input type="checkbox" name="auto_login" value="1" {% if edit_credential and edit_credential.auto_login %}checked{% endif %}>
                     <span><b>Использовать этот доступ для автовхода</b>
-                    <small>Только {{ auto_login_url }}. Если отмечен другой доступ этой карточки, выбор переключится на этот.</small></span>
+                    <small>Разрешённые адреса входа: {{ auto_login_urls }}. Если отмечен другой доступ этой карточки, выбор переключится на этот.</small></span>
                 </label>
                 {% else %}
-                <p class="auto-login-hint">Автовход с расширением сейчас поддерживается только для {{ auto_login_url }}. Остальные пароли остаются в Vault для ручного входа.</p>
+                <p class="auto-login-hint">Автовход с расширением разрешён только для: {{ auto_login_urls }}. Адрес этой карточки в список не входит, поэтому пароли остаются в Vault для ручного входа.</p>
                 {% endif %}
 
                 <button class="primary-button full" type="submit">

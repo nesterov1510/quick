@@ -312,6 +312,52 @@ class QuickAccessTests(unittest.TestCase):
         }).status_code, 302)
         self.assertEqual(self.client.post(path, data={"csrf_token": vault_token}).status_code, 409)
 
+    def test_configured_service_becomes_an_autologin_card(self):
+        from vault_control.autologin import is_supported_login_url
+
+        custom_url = "https://crm.example.com/login"
+        main_token = self.login()
+        app_id = self.add(main_token, "CRM", custom_url)
+        vault_token = self.unlock_vault()
+        fields = {"title": "CRM", "username": "fake-user", "password": "fake-password"}
+        form = f"/vault/app/{app_id}/credential"
+
+        # Without an allowlist entry the checkbox is not offered and the
+        # server refuses the opt-in even if the request forges it.
+        self.assertNotIn('name="auto_login"', self.client.get(f"/vault/app/{app_id}").get_data(as_text=True))
+        self.assertEqual(self.client.post(form, data={
+            **fields, "auto_login": "1", "csrf_token": vault_token,
+        }).status_code, 400)
+        self.assertEqual(self.client.post(form, data={
+            **fields, "csrf_token": vault_token,
+        }).status_code, 302)
+        self.assertFalse(self.card_autologin(app_id))
+        self.assertEqual(self.client.post(f"/vault/app/{app_id}/autologin", data={
+            "csrf_token": vault_token}).status_code, 409)
+
+        with patch.dict(os.environ, {"VAULT_AUTOLOGIN_SITES": custom_url}):
+            self.assertIn(custom_url, self.client.get("/vault/").get_data(as_text=True))
+            self.assertIn('name="auto_login"', self.client.get(f"/vault/app/{app_id}").get_data(as_text=True))
+            with closing(self.module.get_db()) as db:
+                credential_id = db.execute(
+                    "SELECT id FROM app_credentials WHERE app_id=?", (app_id,)).fetchone()[0]
+            self.assertEqual(self.client.post(f"/vault/credential/{credential_id}/edit", data={
+                **fields, "auto_login": "1", "csrf_token": vault_token,
+            }).status_code, 302)
+            self.assertTrue(self.card_autologin(app_id))
+            response = self.client.post(f"/vault/app/{app_id}/autologin", data={"csrf_token": vault_token})
+            self.assertEqual(response.get_json(), {
+                "ok": True, "login_url": custom_url,
+                "username": fields["username"], "password": fields["password"],
+            })
+            # A lookalike of the configured service still gets nothing.
+            self.assertFalse(is_supported_login_url("https://crm.example.com.evil.test/login"))
+
+        # Restarting without the configuration removes the auto-login card.
+        self.assertFalse(self.card_autologin(app_id))
+        self.assertEqual(self.client.post(f"/vault/app/{app_id}/autologin", data={
+            "csrf_token": vault_token}).status_code, 409)
+
     def test_old_vault_database_migrates_without_enabling_autologin(self):
         token = self.login()
         app_id = self.add(token, "Old", "https://msb-activity.meryosab.com/login")

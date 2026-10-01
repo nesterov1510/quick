@@ -1,20 +1,12 @@
 {
   "manifest_version": 3,
   "name": "MSB Quick Access · Автовход",
-  "version": "0.1.0",
-  "description": "Однократный автовход в MSB Activity из разблокированного Quick Access Vault.",
+  "version": "0.2.0",
+  "description": "Однократный автовход в разрешённые сервисы из разблокированного Quick Access Vault.",
   "minimum_chrome_version": "111",
   "permissions": ["activeTab", "scripting", "storage", "alarms"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "host_permissions": ["https://msb-activity.meryosab.com/*"],
   "background": {"service_worker": "background.js"},
-  "action": {"default_popup": "popup.html"},
-  "content_scripts": [
-    {
-      "matches": ["https://msb-activity.meryosab.com/*"],
-      "js": ["target.js"],
-      "run_at": "document_idle",
-      "all_frames": false
-    }
-  ]
+  "action": {"default_popup": "popup.html"}
 }

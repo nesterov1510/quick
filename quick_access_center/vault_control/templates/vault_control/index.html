@@ -30,6 +30,22 @@
         {% if search %}<a class="soft-button" href="{{ url_for('vault_control.vault_index') }}">Сбросить</a>{% endif %}
     </form>
 
+    <div class="warning-box autologin-sites">
+        <b>⚡ Автовход разрешён для адресов:</b>
+        {% for item in autologin_urls %}<code>{{ item }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+        <br>Другой сервис добавляется списком <code>VAULT_AUTOLOGIN_SITES</code> в <code>vault_control/vault.env</code>
+        и записью в <code>browser_extension/sites.json</code>.
+        {% if autologin_invalid %}
+            <br><b>Пропущены некорректные значения:</b>
+            {% for item in autologin_invalid %}<code>{{ item }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+            — нужен точный HTTPS-адрес страницы входа, без <code>*</code>, параметров и фрагментов.
+            {% if not autologin_private_http %}
+                Адрес <code>http://</code> в локальной сети допускается только с
+                <code>VAULT_AUTOLOGIN_ALLOW_PRIVATE_HTTP=1</code>: пароль пойдёт по сети открытым текстом.
+            {% endif %}
+        {% endif %}
+    </div>
+
     {% if apps %}
     <div class="vault-app-grid">
         {% for item in apps %}

@@ -1,0 +1,22 @@
+{
+  "comment": "Шаблон для sites.local.json. Скопируйте этот файл в sites.local.json (он не попадает в Git), оставьте нужные сервисы и перезагрузите расширение. Адрес обязан быть точным и совпадать с VAULT_AUTOLOGIN_SITES в vault_control/vault.env. Селекторы не обязательны: без них адаптер ищет обычную форму сам (одно поле пароля + одно поле логина, POST на тот же origin).",
+  "sites": [
+    {
+      "name": "CRM",
+      "login_url": "https://crm.example.com/login"
+    },
+    {
+      "name": "Портал с нестандартной формой",
+      "login_url": "https://portal.example.ru/auth",
+      "username_selector": "input[name='USER_LOGIN']",
+      "password_selector": "input[name='USER_PASSWORD']",
+      "submit_selector": "button[name='Login']"
+    },
+    {
+      "name": "Внутренний сервис без TLS",
+      "login_url": "http://192.168.8.81:8085/login",
+      "allow_insecure": true,
+      "_comment": "allow_insecure работает только для частных адресов (192.168.x.x, 10.x.x.x, 172.16-31.x.x, 127.x.x.x, localhost) и только вместе с VAULT_AUTOLOGIN_ALLOW_PRIVATE_HTTP=1 на сервере. Пароль передаётся по сети открытым текстом."
+    }
+  ]
+}

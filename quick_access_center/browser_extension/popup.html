@@ -6,9 +6,12 @@
   <title>Quick Access · Автовход</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 17px; width: 340px; background: #171a22; color: #e0e5ee; font: 13px/1.5 system-ui, sans-serif; }
+    body { margin: 0; padding: 17px; width: 360px; background: #171a22; color: #e0e5ee; font: 13px/1.5 system-ui, sans-serif; }
     h1 { font-size: 16px; margin: 0 0 8px; }
+    h2 { font-size: 12px; margin: 14px 0 6px; color: #afb9c9; text-transform: uppercase; letter-spacing: .04em; }
     p { margin: 8px 0; color: #afb9c9; }
+    ul { margin: 6px 0 0; padding-left: 18px; color: #afb9c9; }
+    li { margin: 3px 0; overflow-wrap: anywhere; }
     code { display: block; overflow-wrap: anywhere; color: #a7c3f4; background: #222938; padding: 8px; border-radius: 6px; }
     button { margin-top: 13px; border: 0; border-radius: 7px; padding: 10px 12px; width: 100%; font: inherit; font-weight: 700; color: #091221; background: #8cafe9; cursor: pointer; }
     button:disabled { opacity: .5; cursor: not-allowed; }
@@ -19,9 +22,13 @@
 </head>
 <body>
   <h1>⚡ Quick Access · Автовход</h1>
-  <p>Поддерживаемый сайт: <b>msb-activity.meryosab.com</b>.</p>
-  <p>Откройте свою панель Quick Access, войдите в неё и нажмите кнопку ниже. Разрешение выдаётся только выбранному адресу панели.</p>
+  <p>Откройте свою панель Quick Access, войдите в неё и нажмите кнопку ниже. Разрешение выдаётся адресу панели и страницам входа перечисленных сервисов.</p>
   <code id="panel">Панель пока не подключена</code>
+
+  <h2>Сервисы автовхода</h2>
+  <ul id="sites"></ul>
+  <p>Список берётся из <b>sites.json</b> и <b>sites.local.json</b>. Новый адрес должен быть также в <b>VAULT_AUTOLOGIN_SITES</b> (<code>vault_control/vault.env</code>), после чего перезагрузите расширение.</p>
+
   <button id="connect" type="button">Подключить открытую панель</button>
   <p id="status" role="status" aria-live="polite"></p>
   <script src="popup.js"></script>
