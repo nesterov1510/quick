@@ -21,15 +21,12 @@ def provision_token(db_factory, app_id: int, credential_id: int, app_url: str, t
     from vault_control.autologin import (
         is_quick_access_supported_url,
         normalize_login_url,
-        quick_access_client_id,
         quick_access_private_http_allowed,
     )
     from vault_control.vault_settings import encrypt_secret
 
     if not _valid_token(token):
         raise ValueError("Некорректный формат сервисного токена")
-    if not quick_access_client_id():
-        raise ValueError("Некорректный VAULT_QUICK_ACCESS_CLIENT_ID")
     canonical_target = normalize_login_url(
         app_url,
         allow_private_http=quick_access_private_http_allowed(),
@@ -104,7 +101,6 @@ def main() -> int:
         from vault_control.autologin import (
             is_quick_access_supported_url,
             normalize_login_url,
-            quick_access_client_id,
             quick_access_private_http_allowed,
         )
         from vault_control.vault_settings import (
@@ -120,10 +116,6 @@ def main() -> int:
     if not vault_config.get("enabled") or not is_vault_configured(vault_config):
         print("Vault не настроен или отключён.", file=sys.stderr)
         return 2
-    if not quick_access_client_id():
-        print("Некорректный VAULT_QUICK_ACCESS_CLIENT_ID.", file=sys.stderr)
-        return 2
-
     conn = app.get_db()
     try:
         rows = conn.execute(

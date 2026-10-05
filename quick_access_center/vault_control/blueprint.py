@@ -32,12 +32,12 @@ from vault_control.autologin import (
     is_supported_login_url,
     normalize_login_url,
     private_http_allowed,
-    quick_access_client_id,
     quick_access_private_http_allowed,
     supported_quick_access_urls,
     supported_login_urls,
 )
 from vault_control.quick_access import (
+    SERVICE_ID as QUICK_ACCESS_SERVICE_ID,
     QuickAccessExchangeError,
     callback_url as quick_access_callback_url,
     request_login_ticket,
@@ -305,9 +305,6 @@ def _quick_access_values(
 
     if requested and not site_allowed:
         raise ValueError("Для этого точного адреса Quick Access ticket-вход не разрешён")
-    if requested and not quick_access_client_id():
-        raise ValueError("Некорректный VAULT_QUICK_ACCESS_CLIENT_ID")
-
     if clear_token:
         token_enc = ""
         target = ""
@@ -557,7 +554,6 @@ def create_vault_blueprint() -> Blueprint:
             quick_access_urls=supported_quick_access_urls(),
             quick_access_invalid=invalid_quick_access_url_entries(),
             quick_access_private_http=quick_access_private_http_allowed(),
-            quick_access_client_id=quick_access_client_id(),
             edit_quick_access_target_matches=bool(
                 edit_credential
                 and edit_credential.quick_access_target == normalize_login_url(
@@ -686,8 +682,10 @@ def create_vault_blueprint() -> Blueprint:
             conn.close()
 
         state = secrets.token_urlsafe(32)
+        attempt_id = secrets.token_urlsafe(32)
+        callback = quick_access_callback_url(app_item["url"])
         try:
-            code, expires_in = request_login_ticket(app_item["url"], service_token, state)
+            code = request_login_ticket(app_item["url"], service_token, state, attempt_id)
         except QuickAccessExchangeError as error:
             _log_warning(f"Quick Access ticket не выдан: app_id={app_id}")
             return render_template(
@@ -708,16 +706,16 @@ def create_vault_blueprint() -> Blueprint:
         finally:
             conn.close()
 
-        callback = quick_access_callback_url(app_item["url"])
         origin = quick_access_service_origin(app_item["url"])
         nonce = secrets.token_urlsafe(18)
         response = make_response(render_template(
             "vault_control/quick_access_handoff.html",
             service_name=app_item["name"],
+            service_id=QUICK_ACCESS_SERVICE_ID,
             callback_url=callback,
             code=code,
             state=state,
-            expires_in=expires_in,
+            attempt_id=attempt_id,
             csp_nonce=nonce,
         ))
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"

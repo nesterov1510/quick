@@ -9,10 +9,13 @@
     <main>
         <h1>Выполняется вход в {{ service_name }}</h1>
         <p>Сервис получит одноразовый код. Постоянный токен Quick Access в браузер не передаётся.</p>
-        <p>Код действует не более {{ expires_in }} секунд и может быть использован один раз.</p>
+        <p>Код короткоживущий и может быть использован только один раз.</p>
         <form id="quick-access-handoff" method="post" action="{{ callback_url }}" autocomplete="off">
             <input type="hidden" name="code" value="{{ code }}">
             <input type="hidden" name="state" value="{{ state }}">
+            <input type="hidden" name="service" value="{{ service_id }}">
+            <input type="hidden" name="callback_uri" value="{{ callback_url }}">
+            <input type="hidden" name="attempt_id" value="{{ attempt_id }}">
             <button type="submit">Продолжить</button>
         </form>
         <noscript><p>Автоматический переход недоступен. Нажмите «Продолжить».</p></noscript>

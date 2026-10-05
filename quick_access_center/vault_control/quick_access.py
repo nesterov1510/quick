@@ -1,33 +1,31 @@
-"""Server-side ticket exchange for services that explicitly support Quick Access login.
+"""Server-side MSB Activity ticket exchange for Quick Access login.
 
-The long-lived service token never leaves this server. It is exchanged for a
-short-lived, single-use code; the browser only submits that one-use code to the
-service's fixed callback.
+The long-lived service token never leaves this server. Quick Access exchanges it
+for a short-lived, single-use code; the browser only submits that code and the
+attempt metadata to the service's fixed callback.
 """
 from __future__ import annotations
 
-import hmac
 import http.client
 import json
 import re
 import urllib.error
 import urllib.request
-from typing import Tuple
 from urllib.parse import urlsplit
 
 from vault_control.autologin import (
     is_quick_access_supported_url,
     normalize_login_url,
-    quick_access_client_id,
     quick_access_private_http_allowed,
 )
 
-TICKET_PATH = "/auth/quick-access/ticket"
-CALLBACK_PATH = "/auth/quick-access/callback"
+SERVICE_ID = "msb-activity"
+AUTHORIZE_PATH = "/api/quick-access/v1/authorize"
+CALLBACK_PATH = "/quick-access/callback"
 MAX_RESPONSE_BYTES = 16 * 1024
-MAX_TICKET_TTL_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 5.0
 _CODE_RE = re.compile(r"^[A-Za-z0-9_-]{32,512}$")
+_ATTEMPT_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 
 
 class QuickAccessExchangeError(Exception):
@@ -35,7 +33,7 @@ class QuickAccessExchangeError(Exception):
 
 
 def service_origin(login_url: str) -> str:
-    """Return the origin of a validated service login URL."""
+    """Return the origin of a validated MSB Activity login URL."""
     if not is_quick_access_supported_url(login_url):
         raise QuickAccessExchangeError("Сервис не разрешён для входа через Quick Access")
     canonical = normalize_login_url(
@@ -48,8 +46,8 @@ def service_origin(login_url: str) -> str:
     return f"{parts.scheme.lower()}://{parts.netloc.lower()}"
 
 
-def ticket_endpoint(login_url: str) -> str:
-    return service_origin(login_url) + TICKET_PATH
+def authorize_endpoint(login_url: str) -> str:
+    return service_origin(login_url) + AUTHORIZE_PATH
 
 
 def callback_url(login_url: str) -> str:
@@ -63,14 +61,18 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def request_login_ticket(login_url: str, service_token: str, state: str) -> Tuple[str, int]:
+def request_login_ticket(
+    login_url: str,
+    service_token: str,
+    state: str,
+    attempt_id: str,
+) -> str:
     """Exchange a service-specific PAT for a one-use browser handoff code.
 
     The exact origin comes from the configured allowlist, not request data. HTTP
     is accepted only when that URL is an explicitly enabled private address.
     Redirects, environment proxies, oversized responses, unexpected content
-    types, mismatched state, and codes outside the documented opaque format are
-    rejected.
+    types, and codes outside the documented opaque format are rejected.
     """
     if not is_quick_access_supported_url(login_url):
         raise QuickAccessExchangeError("Сервис не разрешён для входа через Quick Access")
@@ -83,18 +85,18 @@ def request_login_ticket(login_url: str, service_token: str, state: str) -> Tupl
         raise QuickAccessExchangeError("Токен сервиса не настроен")
     if not isinstance(state, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", state):
         raise QuickAccessExchangeError("Не удалось создать безопасный запрос входа")
+    if not isinstance(attempt_id, str) or not _ATTEMPT_RE.fullmatch(attempt_id):
+        raise QuickAccessExchangeError("Не удалось создать безопасный запрос входа")
 
-    client_id = quick_access_client_id()
-    if not client_id:
-        raise QuickAccessExchangeError("Некорректный VAULT_QUICK_ACCESS_CLIENT_ID")
-
+    target_callback = callback_url(login_url)
     payload = json.dumps({
-        "client_id": client_id,
-        "redirect_uri": callback_url(login_url),
+        "service": SERVICE_ID,
+        "callback_uri": target_callback,
         "state": state,
+        "attempt_id": attempt_id,
     }, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
-        ticket_endpoint(login_url),
+        authorize_endpoint(login_url),
         data=payload,
         headers={
             "Authorization": f"Bearer {service_token}",
@@ -130,20 +132,9 @@ def request_login_ticket(login_url: str, service_token: str, state: str) -> Tupl
     except (UnicodeError, json.JSONDecodeError):
         raise QuickAccessExchangeError("Сервис вернул некорректный ответ") from None
 
-    if not isinstance(data, dict):
+    if not isinstance(data, dict) or set(data) != {"code"}:
         raise QuickAccessExchangeError("Сервис вернул некорректный ответ")
     code = data.get("code")
-    returned_state = data.get("state")
-    expires_in = data.get("expires_in")
     if not isinstance(code, str) or not _CODE_RE.fullmatch(code):
         raise QuickAccessExchangeError("Сервис вернул некорректный билет")
-    if not isinstance(returned_state, str) or not hmac.compare_digest(returned_state, state):
-        raise QuickAccessExchangeError("Проверка состояния входа не пройдена")
-    if (
-        isinstance(expires_in, bool)
-        or not isinstance(expires_in, int)
-        or not 1 <= expires_in <= MAX_TICKET_TTL_SECONDS
-    ):
-        raise QuickAccessExchangeError("Срок действия билета сервиса некорректен")
-
-    return code, expires_in
+    return code

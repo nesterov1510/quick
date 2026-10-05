@@ -32,8 +32,6 @@ EXTRA_LOGIN_URLS_ENV = "VAULT_AUTOLOGIN_SITES"
 ALLOW_PRIVATE_HTTP_ENV = "VAULT_AUTOLOGIN_ALLOW_PRIVATE_HTTP"
 QUICK_ACCESS_SITES_ENV = "VAULT_QUICK_ACCESS_SITES"
 QUICK_ACCESS_ALLOW_PRIVATE_HTTP_ENV = "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP"
-QUICK_ACCESS_CLIENT_ID_ENV = "VAULT_QUICK_ACCESS_CLIENT_ID"
-QUICK_ACCESS_DEFAULT_CLIENT_ID = "quick-access-center"
 
 # vault.env is re-read only when it actually changed; the dashboard renders
 # frequently and must not touch the disk on every request.
@@ -224,16 +222,6 @@ def quick_access_private_http_allowed() -> bool:
         "1", "true", "yes", "on", "да"
     }
 
-
-def quick_access_client_id() -> str:
-    """Configured public identifier sent to compatible target services."""
-    value = _config_value(QUICK_ACCESS_CLIENT_ID_ENV).strip() or QUICK_ACCESS_DEFAULT_CLIENT_ID
-    if len(value) > 64 or not value[0].isalnum() or any(
-        char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
-        for char in value
-    ):
-        return ""
-    return value
 
 
 def parse_quick_access_urls(

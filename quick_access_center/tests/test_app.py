@@ -369,7 +369,6 @@ class QuickAccessTests(unittest.TestCase):
         with patch.dict(os.environ, {
             "VAULT_QUICK_ACCESS_SITES": service_url,
             "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP": "0",
-            "VAULT_QUICK_ACCESS_CLIENT_ID": "quick-access-test",
         }):
             unauthenticated = self.client.post("/vault/app/1/quick-access")
             self.assertEqual(unauthenticated.status_code, 302)
@@ -429,18 +428,23 @@ class QuickAccessTests(unittest.TestCase):
             self.assertEqual(self.client.get(path).status_code, 405)
             self.assertEqual(self.client.post(path).status_code, 400)
             self.assertEqual(self.client.post(path, data={"csrf_token": self.login_token}).status_code, 400)
-            with patch("vault_control.blueprint.request_login_ticket", return_value=(code, 60)) as exchange:
+            with patch("vault_control.blueprint.request_login_ticket", return_value=code) as exchange:
                 response = self.client.post(path, data={"csrf_token": vault_token})
             self.assertEqual(response.status_code, 200)
             self.assertEqual(exchange.call_args.args[0:2], (service_url, service_token))
-            self.assertEqual(exchange.call_args.args[2].__len__(), 43)
+            self.assertEqual(len(exchange.call_args.args[2]), 43)
+            self.assertEqual(len(exchange.call_args.args[3]), 43)
             self.assertEqual(response.headers["Cache-Control"], "no-store, no-cache, must-revalidate, private")
             self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
             self.assertIn("form-action https://ticket.example.test", response.headers["Content-Security-Policy"])
             body = response.get_data(as_text=True)
             self.assertIn('method="post"', body)
-            self.assertIn('action="https://ticket.example.test/auth/quick-access/callback"', body)
+            callback = "https://ticket.example.test/quick-access/callback"
+            self.assertIn(f'action="{callback}"', body)
             self.assertIn(f'name="code" value="{code}"', body)
+            self.assertIn('name="service" value="msb-activity"', body)
+            self.assertIn(f'name="callback_uri" value="{callback}"', body)
+            self.assertRegex(body, r'name="attempt_id" value="[A-Za-z0-9_-]{43}"')
             self.assertNotIn(service_token, body)
             self.assertNotIn("service account", body)
             self.assertNotIn("Bearer", body)
@@ -495,11 +499,12 @@ class QuickAccessTests(unittest.TestCase):
             self.assertFalse(is_quick_access_supported_url("https://service.example.test.evil/login"))
             self.assertFalse(is_quick_access_supported_url("https://service.example.test/other"))
 
-    def test_quick_access_ticket_exchange_pins_origin_and_rejects_bad_response(self):
+    def test_quick_access_ticket_exchange_matches_msb_activity_contract(self):
         from vault_control import quick_access
 
         service_url = "https://ticket.example.test/portal"
         state = "S" * 43
+        attempt_id = "A" * 43
         token = "pat_server_only_0123456789"
 
         class FakeOpener:
@@ -523,22 +528,25 @@ class QuickAccessTests(unittest.TestCase):
         with patch.dict(os.environ, {
             "VAULT_QUICK_ACCESS_SITES": service_url,
             "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP": "0",
-            "VAULT_QUICK_ACCESS_CLIENT_ID": "qa-test-client",
         }):
-            fake = FakeOpener(response_for({"code": "K" * 43, "state": state, "expires_in": 60}))
+            fake = FakeOpener(response_for({"code": "K" * 43}))
             with patch("vault_control.quick_access.urllib.request.build_opener", return_value=fake) as build:
-                code, ttl = quick_access.request_login_ticket(service_url, token, state)
-            self.assertEqual((code, ttl), ("K" * 43, 60))
+                code = quick_access.request_login_ticket(service_url, token, state, attempt_id)
+            self.assertEqual(code, "K" * 43)
             request, timeout = fake.calls[0]
-            self.assertEqual(request.full_url, "https://ticket.example.test/auth/quick-access/ticket")
+            self.assertEqual(
+                request.full_url,
+                "https://ticket.example.test/api/quick-access/v1/authorize",
+            )
             self.assertEqual(request.get_method(), "POST")
             self.assertEqual(request.get_header("Authorization"), f"Bearer {token}")
             self.assertEqual(timeout, 5.0)
             payload = json.loads(request.data.decode("utf-8"))
             self.assertEqual(payload, {
-                "client_id": "qa-test-client",
-                "redirect_uri": "https://ticket.example.test/auth/quick-access/callback",
+                "service": "msb-activity",
+                "callback_uri": "https://ticket.example.test/quick-access/callback",
                 "state": state,
+                "attempt_id": attempt_id,
             })
             handlers = build.call_args.args
             redirect_handler = next(
@@ -555,19 +563,24 @@ class QuickAccessTests(unittest.TestCase):
             self.assertEqual(proxy_handler.proxies, {})
 
             for bad_payload in (
-                {"code": "K" * 43, "state": "wrong-state", "expires_in": 60},
-                {"code": "K" * 43, "state": state, "expires_in": 61},
-                {"code": "short", "state": state, "expires_in": 60},
+                {"code": "short"},
+                {"code": "K" * 43, "state": state},
+                {"code": "K" * 43, "unexpected": "value"},
             ):
                 fake = FakeOpener(response_for(bad_payload))
                 with patch("vault_control.quick_access.urllib.request.build_opener", return_value=fake):
                     with self.assertRaises(quick_access.QuickAccessExchangeError):
-                        quick_access.request_login_ticket(service_url, token, state)
+                        quick_access.request_login_ticket(service_url, token, state, attempt_id)
 
-            fake = FakeOpener(response_for({"code": "K" * 43, "state": state, "expires_in": 10}, "text/html"))
+            fake = FakeOpener(response_for({"code": "K" * 43}, "text/html"))
             with patch("vault_control.quick_access.urllib.request.build_opener", return_value=fake):
                 with self.assertRaises(quick_access.QuickAccessExchangeError):
-                    quick_access.request_login_ticket(service_url, token, state)
+                    quick_access.request_login_ticket(service_url, token, state, attempt_id)
+
+            fake = FakeOpener(response_for({"code": "K" * 43}))
+            with patch("vault_control.quick_access.urllib.request.build_opener", return_value=fake):
+                with self.assertRaises(quick_access.QuickAccessExchangeError):
+                    quick_access.request_login_ticket(service_url, token, state, "short")
 
     def test_quick_access_launch_is_rate_limited(self):
         service_url = "https://rate-limited.example.test/"
@@ -592,7 +605,7 @@ class QuickAccessTests(unittest.TestCase):
             }).status_code, 302)
             with patch(
                 "vault_control.blueprint.request_login_ticket",
-                side_effect=lambda _url, _token, _state: (secrets.token_urlsafe(32), 30),
+                side_effect=lambda _url, _token, _state, _attempt_id: secrets.token_urlsafe(32),
             ) as exchange:
                 for _ in range(6):
                     self.assertEqual(self.client.post(

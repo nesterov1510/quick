@@ -136,7 +136,7 @@
                 </label>
 
                 {% if quick_access_supported %}
-                <p class="auto-login-hint">Постоянный сервисный токен не вводится и не отображается в браузере. Установите или ротируйте его на сервере через терминал: <code>python vault_control/set_quick_access_token.py</code>. Идентификатор клиента сервиса: <code>{{ quick_access_client_id }}</code>.</p>
+                <p class="auto-login-hint">Постоянный сервисный токен хранится в существующем Vault и не показывается этой страницей. Установка и ротация выполняются интерактивно на сервере командой <code>python vault_control/set_quick_access_token.py</code>. Сервис: <code>msb-activity</code>.</p>
                 {% endif %}
                 {% if edit_credential and edit_credential.quick_access_token_configured %}
                 <p class="auto-login-hint">Токен хранится зашифрованным и не может быть прочитан из этой страницы. После отзыва токена в целевом сервисе отметьте ниже удаление.</p>
