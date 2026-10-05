@@ -113,6 +113,37 @@ MAIN_ACCESS_TRUSTED_PROXIES=127.0.0.1,::1
 
 Для Vault — аналогичные `VAULT_ACCESS_ALLOWED_IPS`, `VAULT_ACCESS_TRUST_PROXY`, `VAULT_ACCESS_TRUSTED_PROXIES`. Укажите **свои** адреса и сеть; прокси с другого хоста должен быть явно добавлен в `*_TRUSTED_PROXIES`. Включайте `TRUST_PROXY=1` только за прокси, который очищает/дополняет `X-Forwarded-For`. Код не доверяет заголовкам от произвольного посетителя. Не используйте `ALLOWED_IPS=*` в production. После изменения `.env` перезапустите Gunicorn.
 
+### Автоустановка/удаление Linux systemd
+
+Для Linux с systemd из постоянного checkout репозитория:
+
+```bash
+cd quick_access_center
+sudo ./deploy/install.sh
+```
+
+Установщик берёт пользователя, вызвавшего `sudo`, запускает интерактивные `setup_access.py` и `setup_vault.py` только если соответствующих конфигураций ещё нет, создаёт venv в `/opt/quick-access-center-venv`, а службу `quick-access-center.service` включает автоматически. При повторном запуске существующие `access.env`, `vault.env` и ключ Vault не перезаписываются; обновляются зависимости и unit. Исходники должны оставаться по тому же пути. Для другого пользователя или checkout передавайте переменные через `sudo env`, например `sudo env QUICK_ACCESS_SERVICE_USER=appuser QUICK_ACCESS_APP_DIR=/srv/quick-access-center QUICK_ACCESS_PORT=5051 ./deploy/install.sh`; сервисный пользователь должен иметь доступ к исходникам и создавать отсутствующие конфиги.
+
+Gunicorn слушает только `127.0.0.1:5050` (или `QUICK_ACCESS_PORT`), открывать этот порт в firewall не нужно. Установщик **не настраивает домен или TLS reverse proxy** — настройте его по инструкциям выше. `MSB_QUICK_ACCESS_COOKIE_SECURE=1` включён; панель предназначена для HTTPS, не для прямого HTTP-доступа. IP allowlist по умолчанию ограничен localhost; перед внешним доступом проверьте `access_control/access.env` и `vault_control/vault.env`.
+
+Проверка и журналы:
+
+```bash
+sudo systemctl status quick-access-center
+sudo journalctl -u quick-access-center -f
+sudo systemctl restart quick-access-center
+```
+
+Безопасное удаление службы:
+
+```bash
+sudo ./deploy/uninstall.sh                 # остановить/удалить unit; данные и конфиги оставить
+sudo ./deploy/uninstall.sh --remove-venv   # дополнительно удалить venv (с подтверждением)
+sudo ./deploy/uninstall.sh --purge-data    # безвозвратно удалить БД, картинки, логи и rate-limit state
+```
+
+`--purge-data` требует интерактивно набрать точный путь; без явного флага данные не удаляются. Исходники, `access.env`, `vault.env` и `VAULT_ENCRYPTION_KEY` сохраняются даже при удалении службы. Перед удалением данных сохраните нужные резервные копии и отдельно отзовите PAT целевых сервисов.
+
 ## Проверка и данные
 
 ```bash
