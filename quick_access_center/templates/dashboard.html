@@ -685,6 +685,7 @@
             text-overflow: ellipsis;
         }
         .mini-card[data-auto-login="1"] .mini-type { color: var(--success-text); }
+        .mini-card[data-quick-access="1"] .mini-type { color: var(--accent-text); }
         .auto-login-help { margin: 0 0 12px; color: var(--text-dim); font-size: 11.5px; line-height: 1.5; }
         .auto-login-help a { color: var(--accent-text); text-decoration: underline; }
 
@@ -1193,7 +1194,10 @@
     </div>
 
     {% if auto_login_ids %}
-    <p class="auto-login-help">⚡ Для отмеченных карточек: сначала <a href="/vault/">разблокируйте Vault</a> и подключите расширение Chrome/Edge к этой панели. Без расширения карточка только откроет страницу входа; пароль в URL не передаётся.</p>
+    <p class="auto-login-help">⚡ Для карточек со значком автовхода: разблокируйте Vault и подключите расширение Chrome/Edge. Оно продолжает обслуживать старый поток только для таких карточек.</p>
+    {% endif %}
+    {% if quick_access_ids %}
+    <p class="auto-login-help">🔑 Для карточек со значком Quick Access обычный клик отправит явный CSRF-защищённый POST и создаст одноразовый ticket. Постоянный токен в браузер не передаётся.</p>
     {% endif %}
     {% if apps %}
     <div class="grid" id="cardsGrid">
@@ -1203,10 +1207,11 @@
             draggable="false"
             role="link"
             tabindex="0"
-            aria-label="Открыть {{ item.name }}"
-            title="Открыть {{ item.name }}"
+            aria-label="{{ 'Безопасно войти в ' if item.id in quick_access_ids else 'Открыть ' }}{{ item.name }}"
+            title="{{ 'Одноразовый вход Quick Access · ' if item.id in quick_access_ids else 'Открыть ' }}{{ item.name }}"
             data-id="{{ item.id }}"
-            data-auto-login="{{ 1 if item.id in auto_login_ids else 0 }}"
+            data-auto-login="{{ 1 if item.id in auto_login_ids and item.id not in quick_access_ids else 0 }}"
+            data-quick-access="{{ 1 if item.id in quick_access_ids else 0 }}"
             data-name="{{ item.name|e }}"
             data-status="{{ item.status|e }}"
             data-url="{{ item.url|e }}"
@@ -1220,6 +1225,11 @@
             data-image="{{ item.image_filename|e }}"
         >
             <textarea class="mini-launch-info" hidden aria-hidden="true">{{ item.launch_info or '' }}</textarea>
+            {% if item.id in quick_access_ids %}
+            <form class="quick-access-launch-form" method="post" target="_blank" rel="noopener noreferrer" action="{{ url_for('vault_control.quick_access_launch', app_id=item.id) }}" hidden>
+                <input type="hidden" name="csrf_token" value="{{ vault_quick_access_csrf }}">
+            </form>
+            {% endif %}
 
             <div class="mini-media">
                 {% if item.image_filename %}
@@ -1232,8 +1242,8 @@
             <div class="mini-body">
                 <div class="mini-name" title="{{ item.name }}">{{ item.name }}</div>
 
-                <div class="mini-type" title="{{ 'Автовход · ' if item.id in auto_login_ids else '' }}{{ item.app_type or 'Без категории' }}">
-                    {% if item.id in auto_login_ids %}⚡ Автовход · {% endif %}{{ item.app_type or 'Без категории' }}
+                <div class="mini-type" title="{{ 'Quick Access · ' if item.id in quick_access_ids else ('Автовход · ' if item.id in auto_login_ids else '') }}{{ item.app_type or 'Без категории' }}">
+                    {% if item.id in quick_access_ids %}🔑 Quick Access · {% elif item.id in auto_login_ids %}⚡ Автовход · {% endif %}{{ item.app_type or 'Без категории' }}
                 </div>
 
                 <div class="mini-address" title="{{ item.address or item.url }}">
@@ -1625,6 +1635,14 @@
 
     document.querySelectorAll('.mini-card').forEach(card => {
         const infoButton = card.querySelector('.mini-info-btn');
+        const quickAccessForm = card.querySelector('.quick-access-launch-form');
+        const activateCard = () => {
+            if (card.dataset.quickAccess === '1' && quickAccessForm) {
+                quickAccessForm.requestSubmit();
+                return;
+            }
+            window.open('/open/' + card.dataset.id, '_blank', 'noopener');
+        };
 
         if (infoButton) {
             infoButton.addEventListener('click', event => {
@@ -1638,7 +1656,7 @@
             if (reorderMode) return;
             if (event.target.closest('button, a, input, textarea, select, form')) return;
 
-            window.open('/open/' + card.dataset.id, '_blank', 'noopener');
+            activateCard();
         });
 
         card.addEventListener('keydown', event => {
@@ -1647,7 +1665,7 @@
             if (event.target.closest('button, a, input, textarea, select, form')) return;
 
             event.preventDefault();
-            window.open('/open/' + card.dataset.id, '_blank', 'noopener');
+            activateCard();
         });
 
         card.addEventListener('dragstart', event => {

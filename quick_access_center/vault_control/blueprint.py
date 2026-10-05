@@ -2,7 +2,8 @@
 """Отдельный админ-раздел для зашифрованных логинов и паролей карточек."""
 from __future__ import annotations
 
-import sqlite3
+import hashlib
+import secrets
 import time
 from datetime import datetime
 from typing import Callable, Optional
@@ -14,6 +15,7 @@ from flask import (
     abort,
     flash,
     jsonify,
+    make_response,
     redirect,
     render_template,
     request,
@@ -25,9 +27,21 @@ from vault_control.autologin import (
     canonical_login_url,
     describe_supported_login_urls,
     invalid_login_url_entries,
+    invalid_quick_access_url_entries,
+    is_quick_access_supported_url,
     is_supported_login_url,
+    normalize_login_url,
     private_http_allowed,
+    quick_access_client_id,
+    quick_access_private_http_allowed,
+    supported_quick_access_urls,
     supported_login_urls,
+)
+from vault_control.quick_access import (
+    QuickAccessExchangeError,
+    callback_url as quick_access_callback_url,
+    request_login_ticket,
+    service_origin as quick_access_service_origin,
 )
 from vault_control.vault_settings import (
     clear_failed_logins,
@@ -113,6 +127,9 @@ def init_vault_db() -> None:
                 password_enc TEXT NOT NULL DEFAULT '',
                 notes_enc TEXT NOT NULL DEFAULT '',
                 auto_login INTEGER NOT NULL DEFAULT 0,
+                quick_access_token_enc TEXT NOT NULL DEFAULT '',
+                quick_access_enabled INTEGER NOT NULL DEFAULT 0,
+                quick_access_target TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
@@ -120,9 +137,22 @@ def init_vault_db() -> None:
         """)
         # Existing Vault databases predate the opt-in auto-login flag.
         cur.execute("PRAGMA table_info(app_credentials)")
-        if "auto_login" not in {row[1] for row in cur.fetchall()}:
+        existing_columns = {row[1] for row in cur.fetchall()}
+        if "auto_login" not in existing_columns:
             cur.execute(
                 "ALTER TABLE app_credentials ADD COLUMN auto_login INTEGER NOT NULL DEFAULT 0"
+            )
+        if "quick_access_token_enc" not in existing_columns:
+            cur.execute(
+                "ALTER TABLE app_credentials ADD COLUMN quick_access_token_enc TEXT NOT NULL DEFAULT ''"
+            )
+        if "quick_access_enabled" not in existing_columns:
+            cur.execute(
+                "ALTER TABLE app_credentials ADD COLUMN quick_access_enabled INTEGER NOT NULL DEFAULT 0"
+            )
+        if "quick_access_target" not in existing_columns:
+            cur.execute(
+                "ALTER TABLE app_credentials ADD COLUMN quick_access_target TEXT NOT NULL DEFAULT ''"
             )
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_app_credentials_app_id
@@ -131,6 +161,17 @@ def init_vault_db() -> None:
         cur.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_app_credentials_one_auto_login
             ON app_credentials(app_id) WHERE auto_login = 1
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_app_credentials_one_quick_access
+            ON app_credentials(app_id) WHERE quick_access_enabled = 1
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS quick_access_rate_limits (
+                rate_key TEXT PRIMARY KEY,
+                window_start INTEGER NOT NULL,
+                attempts INTEGER NOT NULL
+            )
         """)
         conn.commit()
         _log_success("Таблица app_credentials готова")
@@ -167,6 +208,11 @@ def _decrypt_credential(row) -> dict:
         "password": decrypt_secret(row["password_enc"]),
         "notes": decrypt_secret(row["notes_enc"]),
         "auto_login": bool(row["auto_login"]),
+        # Never send the reusable service token to the browser, even inside the
+        # authenticated Vault page. Only expose whether one is configured.
+        "quick_access_enabled": bool(row["quick_access_enabled"]),
+        "quick_access_token_configured": bool(row["quick_access_token_enc"]),
+        "quick_access_target": row["quick_access_target"] or "",
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -178,6 +224,61 @@ def _require_csrf():
         abort(400, description="Неверный CSRF-токен")
 
 
+def _consume_quick_access_rate_limit(vault_user: str, app_id: int) -> tuple[bool, int]:
+    """Atomically allow six attempts/card and thirty/account in each 60-second window."""
+    now = int(time.time())
+    window_seconds = 60
+    user_bytes = vault_user.encode("utf-8")
+    account_key = hashlib.sha256(b"account:" + user_bytes).hexdigest()
+    card_key = hashlib.sha256(
+        b"card:" + user_bytes + bytes([0]) + str(int(app_id)).encode("ascii")
+    ).hexdigest()
+    buckets = ((account_key, 30), (card_key, 6))
+    conn = _get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN IMMEDIATE")
+        rows = []
+        retry_after = 0
+        for key, limit in buckets:
+            row = cur.execute(
+                "SELECT window_start, attempts FROM quick_access_rate_limits WHERE rate_key = ?",
+                (key,),
+            ).fetchone()
+            rows.append((key, limit, row))
+            if row and now - int(row["window_start"]) < window_seconds and int(row["attempts"]) >= limit:
+                retry_after = max(
+                    retry_after,
+                    max(1, window_seconds - (now - int(row["window_start"]))),
+                )
+        if retry_after:
+            conn.rollback()
+            return False, retry_after
+
+        for key, _limit, row in rows:
+            if not row or now - int(row["window_start"]) >= window_seconds:
+                cur.execute(
+                    """INSERT INTO quick_access_rate_limits(rate_key, window_start, attempts)
+                       VALUES (?, ?, 1)
+                       ON CONFLICT(rate_key) DO UPDATE SET window_start = excluded.window_start,
+                           attempts = 1""",
+                    (key, now),
+                )
+            else:
+                cur.execute(
+                    "UPDATE quick_access_rate_limits SET attempts = attempts + 1 WHERE rate_key = ?",
+                    (key,),
+                )
+        cur.execute("DELETE FROM quick_access_rate_limits WHERE window_start < ?", (now - 86400,))
+        conn.commit()
+        return True, 0
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def _requested_auto_login(app_item, username: str, password: str) -> bool:
     requested = request.form.get("auto_login") == "1"
     if requested and not is_supported_login_url(app_item["url"]):
@@ -185,6 +286,48 @@ def _requested_auto_login(app_item, username: str, password: str) -> bool:
     if requested and (not username or not password):
         abort(400, description="Для автовхода нужны логин и пароль")
     return requested
+
+
+def _quick_access_values(
+    app_item,
+    *,
+    existing_token_enc: str = "",
+    existing_target: str = "",
+) -> tuple[str, int, str]:
+    """Keep/clear the terminal-provisioned PAT and validate opt-in state."""
+    clear_token = request.form.get("clear_quick_access_token") == "1"
+    requested = request.form.get("quick_access_enabled") == "1" and not clear_token
+    canonical_target = normalize_login_url(
+        app_item["url"],
+        allow_private_http=quick_access_private_http_allowed(),
+    )
+    site_allowed = bool(canonical_target) and is_quick_access_supported_url(app_item["url"])
+
+    if requested and not site_allowed:
+        raise ValueError("Для этого точного адреса Quick Access ticket-вход не разрешён")
+    if requested and not quick_access_client_id():
+        raise ValueError("Некорректный VAULT_QUICK_ACCESS_CLIENT_ID")
+
+    if clear_token:
+        token_enc = ""
+        target = ""
+    else:
+        token_enc = existing_token_enc or ""
+        target = existing_target or ""
+
+    if requested:
+        if not token_enc:
+            raise ValueError(
+                "Сначала установите сервисный токен командой "
+                "python vault_control/set_quick_access_token.py"
+            )
+        if target != canonical_target:
+            raise ValueError(
+                "Ссылка карточки изменилась. Повторно привяжите токен командой "
+                "python vault_control/set_quick_access_token.py"
+            )
+
+    return token_enc, int(requested), target
 
 
 def _render_login(error_message: str = "", next_url: str = "/vault/", login_value: str = ""):
@@ -376,6 +519,9 @@ def create_vault_blueprint() -> Blueprint:
             autologin_urls=supported_login_urls(),
             autologin_invalid=invalid_login_url_entries(),
             autologin_private_http=private_http_allowed(),
+            quick_access_urls=supported_quick_access_urls(),
+            quick_access_invalid=invalid_quick_access_url_entries(),
+            quick_access_private_http=quick_access_private_http_allowed(),
         )
 
     @bp.route("/app/<int:app_id>")
@@ -407,6 +553,18 @@ def create_vault_blueprint() -> Blueprint:
             edit_credential=edit_credential,
             auto_login_supported=is_supported_login_url(app_item["url"]),
             auto_login_urls=describe_supported_login_urls(),
+            quick_access_supported=is_quick_access_supported_url(app_item["url"]),
+            quick_access_urls=supported_quick_access_urls(),
+            quick_access_invalid=invalid_quick_access_url_entries(),
+            quick_access_private_http=quick_access_private_http_allowed(),
+            quick_access_client_id=quick_access_client_id(),
+            edit_quick_access_target_matches=bool(
+                edit_credential
+                and edit_credential.quick_access_target == normalize_login_url(
+                    app_item["url"],
+                    allow_private_http=quick_access_private_http_allowed(),
+                )
+            ),
             csrf_token=get_csrf_token(),
             vault_user=session.get("vault_user", ""),
         )
@@ -465,6 +623,116 @@ def create_vault_blueprint() -> Blueprint:
         finally:
             conn.close()
 
+    @bp.route("/app/<int:app_id>/quick-access", methods=["POST"])
+    @vault_login_required
+    def quick_access_launch(app_id: int):
+        """Exchange a Vault-held service token for a one-use ticket and POST it to the service."""
+        _require_csrf()
+        allowed, retry_after = _consume_quick_access_rate_limit(
+            str(session.get("vault_user", "")), app_id
+        )
+        if not allowed:
+            response = make_response(render_template(
+                "vault_control/quick_access_error.html",
+                message="Слишком много попыток. Подождите немного и повторите вход.",
+            ))
+            response.headers["Retry-After"] = str(retry_after)
+            response.headers["Cache-Control"] = "no-store"
+            return response, 429
+        conn = _get_db()
+        try:
+            app_item = conn.execute("SELECT id, name, url FROM apps WHERE id = ?", (app_id,)).fetchone()
+            if not app_item:
+                abort(404)
+            canonical_target = normalize_login_url(
+                app_item["url"],
+                allow_private_http=quick_access_private_http_allowed(),
+            )
+            if not canonical_target or not is_quick_access_supported_url(app_item["url"]):
+                return render_template(
+                    "vault_control/quick_access_error.html",
+                    message="Этот точный адрес не включён в список сервисов Quick Access.",
+                ), 409
+
+            row = conn.execute(
+                """SELECT quick_access_token_enc, quick_access_target
+                   FROM app_credentials
+                   WHERE app_id = ? AND quick_access_enabled = 1
+                   ORDER BY id DESC LIMIT 1""",
+                (app_id,),
+            ).fetchone()
+            if not row or not row["quick_access_token_enc"]:
+                return render_template(
+                    "vault_control/quick_access_error.html",
+                    message="Для этой карточки не настроен токен Quick Access.",
+                ), 409
+            if row["quick_access_target"] != canonical_target:
+                return render_template(
+                    "vault_control/quick_access_error.html",
+                    message="Адрес карточки изменился. Повторно привяжите токен к текущему адресу в Vault.",
+                ), 409
+
+            try:
+                service_token = get_fernet().decrypt(
+                    row["quick_access_token_enc"].encode("utf-8")
+                ).decode("utf-8")
+            except (InvalidToken, UnicodeError, ValueError, RuntimeError):
+                _log_warning(f"Quick Access token недоступен: app_id={app_id}")
+                return render_template(
+                    "vault_control/quick_access_error.html",
+                    message="Токен недоступен. Проверьте ключ Vault или сохраните токен заново.",
+                ), 409
+        finally:
+            conn.close()
+
+        state = secrets.token_urlsafe(32)
+        try:
+            code, expires_in = request_login_ticket(app_item["url"], service_token, state)
+        except QuickAccessExchangeError as error:
+            _log_warning(f"Quick Access ticket не выдан: app_id={app_id}")
+            return render_template(
+                "vault_control/quick_access_error.html",
+                message=str(error),
+            ), 502
+        finally:
+            # Reduce the lifetime of the plaintext service token in this request.
+            service_token = ""
+
+        conn = _get_db()
+        try:
+            conn.execute(
+                "UPDATE apps SET open_count = open_count + 1, last_opened = ? WHERE id = ?",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), app_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        callback = quick_access_callback_url(app_item["url"])
+        origin = quick_access_service_origin(app_item["url"])
+        nonce = secrets.token_urlsafe(18)
+        response = make_response(render_template(
+            "vault_control/quick_access_handoff.html",
+            service_name=app_item["name"],
+            callback_url=callback,
+            code=code,
+            state=state,
+            expires_in=expires_in,
+            csp_nonce=nonce,
+        ))
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; "
+            f"script-src 'nonce-{nonce}'; "
+            f"form-action {origin}; "
+            "base-uri 'none'; frame-ancestors 'none'; object-src 'none'"
+        )
+        return response
+
     @bp.route("/app/<int:app_id>/credential", methods=["POST"])
     @vault_login_required
     def create_credential(app_id: int):
@@ -483,18 +751,26 @@ def create_vault_blueprint() -> Blueprint:
             return redirect(url_for("vault_control.app_vault", app_id=app_id))
 
         auto_login = _requested_auto_login(app_item, username, password)
+        try:
+            quick_access_token_enc, quick_access_enabled, quick_access_target = _quick_access_values(app_item)
+        except ValueError as error:
+            flash(str(error), "error")
+            return redirect(url_for("vault_control.app_vault", app_id=app_id))
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = _get_db()
         try:
             cur = conn.cursor()
             if auto_login:
                 cur.execute("UPDATE app_credentials SET auto_login = 0 WHERE app_id = ?", (app_id,))
+            if quick_access_enabled:
+                cur.execute("UPDATE app_credentials SET quick_access_enabled = 0 WHERE app_id = ?", (app_id,))
             cur.execute(
                 """
                 INSERT INTO app_credentials (
                     app_id, title_enc, username_enc, password_enc, notes_enc,
-                    auto_login, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    auto_login, quick_access_token_enc, quick_access_enabled,
+                    quick_access_target, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     app_id,
@@ -503,6 +779,9 @@ def create_vault_blueprint() -> Blueprint:
                     encrypt_secret(password),
                     encrypt_secret(notes),
                     int(auto_login),
+                    quick_access_token_enc,
+                    quick_access_enabled,
+                    quick_access_target,
                     now,
                     now,
                 ),
@@ -540,16 +819,28 @@ def create_vault_blueprint() -> Blueprint:
             return redirect(url_for("vault_control.app_vault", app_id=app_id, edit=credential_id))
 
         auto_login = _requested_auto_login(app_item, username, password)
+        try:
+            quick_access_token_enc, quick_access_enabled, quick_access_target = _quick_access_values(
+                app_item,
+                existing_token_enc=row["quick_access_token_enc"],
+                existing_target=row["quick_access_target"],
+            )
+        except ValueError as error:
+            flash(str(error), "error")
+            return redirect(url_for("vault_control.app_vault", app_id=app_id, edit=credential_id))
         conn = _get_db()
         try:
             cur = conn.cursor()
             if auto_login:
                 cur.execute("UPDATE app_credentials SET auto_login = 0 WHERE app_id = ?", (app_id,))
+            if quick_access_enabled:
+                cur.execute("UPDATE app_credentials SET quick_access_enabled = 0 WHERE app_id = ?", (app_id,))
             cur.execute(
                 """
                 UPDATE app_credentials
                 SET title_enc = ?, username_enc = ?, password_enc = ?, notes_enc = ?,
-                    auto_login = ?, updated_at = ?
+                    auto_login = ?, quick_access_token_enc = ?, quick_access_enabled = ?,
+                    quick_access_target = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -558,6 +849,9 @@ def create_vault_blueprint() -> Blueprint:
                     encrypt_secret(password),
                     encrypt_secret(notes),
                     int(auto_login),
+                    quick_access_token_enc,
+                    quick_access_enabled,
+                    quick_access_target,
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     credential_id,
                 ),

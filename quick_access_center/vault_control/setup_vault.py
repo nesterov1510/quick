@@ -77,6 +77,15 @@ def main() -> None:
         else:
             break
 
+    # Add new ticket-login defaults to older vault.env files without changing
+    # any administrator-supplied allowlist or HTTP opt-in.
+    if "VAULT_QUICK_ACCESS_SITES" not in values:
+        lines = update_value(lines, "VAULT_QUICK_ACCESS_SITES", "")
+    if "VAULT_QUICK_ACCESS_CLIENT_ID" not in values:
+        lines = update_value(lines, "VAULT_QUICK_ACCESS_CLIENT_ID", "quick-access-center")
+    if "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP" not in values:
+        lines = update_value(lines, "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP", "0")
+
     lines = update_value(lines, "VAULT_ACCESS_ENABLED", "1")
     lines = update_value(lines, "VAULT_ACCESS_USERNAME", username)
     lines = update_value(lines, "VAULT_ACCESS_PASSWORD_HASH", generate_password_hash(password))

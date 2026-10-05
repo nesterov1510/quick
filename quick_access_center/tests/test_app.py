@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import secrets
 import sys
 import tempfile
 import unittest
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import closing
+from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
@@ -358,6 +360,262 @@ class QuickAccessTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/vault/app/{app_id}/autologin", data={
             "csrf_token": vault_token}).status_code, 409)
 
+    def test_quick_access_token_is_encrypted_and_handoff_is_post_only(self):
+        from cryptography.fernet import Fernet
+
+        service_url = "https://ticket.example.test/portal"
+        service_token = "pat_live_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        code = "C" * 43
+        with patch.dict(os.environ, {
+            "VAULT_QUICK_ACCESS_SITES": service_url,
+            "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP": "0",
+            "VAULT_QUICK_ACCESS_CLIENT_ID": "quick-access-test",
+        }):
+            unauthenticated = self.client.post("/vault/app/1/quick-access")
+            self.assertEqual(unauthenticated.status_code, 302)
+            self.assertIn("/access-control", unauthenticated.location)
+            main_token = self.login()
+            app_id = self.add(main_token, "Ticket service", service_url)
+            self.assertEqual(self.client.post(f"/vault/app/{app_id}/quick-access").status_code, 302)
+            vault_token = self.unlock_vault()
+            created = self.client.post(f"/vault/app/{app_id}/credential", data={
+                "csrf_token": vault_token,
+                "title": "Service account",
+            })
+            self.assertEqual(created.status_code, 302)
+            self.assertNotIn(service_token.encode(), created.data)
+            with closing(self.module.get_db()) as db:
+                credential_id = db.execute(
+                    "SELECT id FROM app_credentials WHERE app_id = ?", (app_id,),
+                ).fetchone()["id"]
+            from vault_control.set_quick_access_token import provision_token
+            with self.assertRaises(ValueError):
+                provision_token(
+                    self.module.get_db, app_id, credential_id,
+                    "https://ticket.example.test.evil/portal", service_token,
+                )
+            provision_token(self.module.get_db, app_id, credential_id, service_url, service_token)
+            enabled = self.client.post(f"/vault/credential/{credential_id}/edit", data={
+                "csrf_token": vault_token,
+                "title": "Service account",
+                "quick_access_enabled": "1",
+            })
+            self.assertEqual(enabled.status_code, 302)
+
+            with closing(self.module.get_db()) as db:
+                stored = db.execute(
+                    "SELECT quick_access_token_enc, quick_access_enabled, quick_access_target "
+                    "FROM app_credentials WHERE app_id = ?", (app_id,),
+                ).fetchone()
+            self.assertNotEqual(stored["quick_access_token_enc"], service_token)
+            self.assertEqual(stored["quick_access_enabled"], 1)
+            self.assertEqual(stored["quick_access_target"], service_url)
+            self.assertEqual(
+                Fernet(os.environ["VAULT_ENCRYPTION_KEY"].encode("ascii")).decrypt(
+                    stored["quick_access_token_enc"].encode("ascii")
+                ).decode("ascii"),
+                service_token,
+            )
+
+            vault_html = self.client.get(f"/vault/app/{app_id}").get_data(as_text=True)
+            self.assertNotIn(service_token, vault_html)
+            self.assertNotIn('name="quick_access_token"', vault_html)
+            dashboard = self.client.get("/").get_data(as_text=True)
+            self.assertRegex(dashboard, rf'data-id="{app_id}"[^>]*data-auto-login="0"[^>]*data-quick-access="1"')
+            self.assertIn("quick-access-launch-form", dashboard)
+            self.assertNotIn(service_token, dashboard)
+
+            path = f"/vault/app/{app_id}/quick-access"
+            self.assertEqual(self.client.get(path).status_code, 405)
+            self.assertEqual(self.client.post(path).status_code, 400)
+            self.assertEqual(self.client.post(path, data={"csrf_token": self.login_token}).status_code, 400)
+            with patch("vault_control.blueprint.request_login_ticket", return_value=(code, 60)) as exchange:
+                response = self.client.post(path, data={"csrf_token": vault_token})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(exchange.call_args.args[0:2], (service_url, service_token))
+            self.assertEqual(exchange.call_args.args[2].__len__(), 43)
+            self.assertEqual(response.headers["Cache-Control"], "no-store, no-cache, must-revalidate, private")
+            self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+            self.assertIn("form-action https://ticket.example.test", response.headers["Content-Security-Policy"])
+            body = response.get_data(as_text=True)
+            self.assertIn('method="post"', body)
+            self.assertIn('action="https://ticket.example.test/auth/quick-access/callback"', body)
+            self.assertIn(f'name="code" value="{code}"', body)
+            self.assertNotIn(service_token, body)
+            self.assertNotIn("service account", body)
+            self.assertNotIn("Bearer", body)
+            self.assertNotIn("?code=", response.location or "")
+            with closing(self.module.get_db()) as db:
+                self.assertEqual(
+                    db.execute("SELECT open_count FROM apps WHERE id = ?", (app_id,)).fetchone()[0],
+                    1,
+                )
+            cleared = self.client.post(f"/vault/credential/{credential_id}/edit", data={
+                "csrf_token": vault_token,
+                "title": "Service account",
+                "clear_quick_access_token": "1",
+            })
+            self.assertEqual(cleared.status_code, 302)
+            with closing(self.module.get_db()) as db:
+                cleared_row = db.execute(
+                    "SELECT quick_access_token_enc, quick_access_enabled FROM app_credentials WHERE id = ?",
+                    (credential_id,),
+                ).fetchone()
+            self.assertEqual((cleared_row["quick_access_token_enc"], cleared_row["quick_access_enabled"]), ("", 0))
+
+    @property
+    def login_token(self):
+        # Main CSRF token returned when login() most recently rendered the dashboard.
+        return self.csrf_from(self.client.get("/").get_data(as_text=True))
+
+    def test_quick_access_configuration_is_exact_and_private_http_is_opt_in(self):
+        from vault_control.autologin import parse_quick_access_urls
+
+        entries = "\n".join((
+            "https://service.example.test/login",
+            "http://192.168.8.20/login",
+            "http://203.0.113.20/login",
+            "https://service.example.test.evil/login?next=/",
+        ))
+        valid, invalid = parse_quick_access_urls(entries, allow_private_http=False)
+        self.assertEqual(valid, ("https://service.example.test/login",))
+        self.assertEqual(len(invalid), 3)
+        valid_private, invalid_private = parse_quick_access_urls(entries, allow_private_http=True)
+        self.assertEqual(valid_private, (
+            "https://service.example.test/login",
+            "http://192.168.8.20/login",
+        ))
+        self.assertEqual(len(invalid_private), 2)
+        from vault_control.autologin import is_quick_access_supported_url
+        with patch.dict(os.environ, {
+            "VAULT_QUICK_ACCESS_SITES": "https://service.example.test/login",
+            "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP": "0",
+        }):
+            self.assertTrue(is_quick_access_supported_url("https://service.example.test/login"))
+            self.assertFalse(is_quick_access_supported_url("https://service.example.test.evil/login"))
+            self.assertFalse(is_quick_access_supported_url("https://service.example.test/other"))
+
+    def test_quick_access_ticket_exchange_pins_origin_and_rejects_bad_response(self):
+        from vault_control import quick_access
+
+        service_url = "https://ticket.example.test/portal"
+        state = "S" * 43
+        token = "pat_server_only_0123456789"
+
+        class FakeOpener:
+            def __init__(self, response):
+                self.response = response
+                self.calls = []
+            def open(self, request, timeout):
+                self.calls.append((request, timeout))
+                return self.response
+
+        def response_for(payload, content_type="application/json"):
+            headers = Message()
+            headers["Content-Type"] = content_type
+            class Response(io.BytesIO):
+                status = 200
+                def __init__(self, body):
+                    super().__init__(body)
+                    self.headers = headers
+            return Response(json.dumps(payload).encode("utf-8"))
+
+        with patch.dict(os.environ, {
+            "VAULT_QUICK_ACCESS_SITES": service_url,
+            "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP": "0",
+            "VAULT_QUICK_ACCESS_CLIENT_ID": "qa-test-client",
+        }):
+            fake = FakeOpener(response_for({"code": "K" * 43, "state": state, "expires_in": 60}))
+            with patch("vault_control.quick_access.urllib.request.build_opener", return_value=fake) as build:
+                code, ttl = quick_access.request_login_ticket(service_url, token, state)
+            self.assertEqual((code, ttl), ("K" * 43, 60))
+            request, timeout = fake.calls[0]
+            self.assertEqual(request.full_url, "https://ticket.example.test/auth/quick-access/ticket")
+            self.assertEqual(request.get_method(), "POST")
+            self.assertEqual(request.get_header("Authorization"), f"Bearer {token}")
+            self.assertEqual(timeout, 5.0)
+            payload = json.loads(request.data.decode("utf-8"))
+            self.assertEqual(payload, {
+                "client_id": "qa-test-client",
+                "redirect_uri": "https://ticket.example.test/auth/quick-access/callback",
+                "state": state,
+            })
+            handlers = build.call_args.args
+            redirect_handler = next(
+                handler for handler in handlers
+                if isinstance(handler, quick_access._NoRedirectHandler)
+            )
+            self.assertIsNone(redirect_handler.redirect_request(
+                request, None, 302, "Found", Message(), "https://evil.example.test/",
+            ))
+            proxy_handler = next(
+                handler for handler in handlers
+                if isinstance(handler, quick_access.urllib.request.ProxyHandler)
+            )
+            self.assertEqual(proxy_handler.proxies, {})
+
+            for bad_payload in (
+                {"code": "K" * 43, "state": "wrong-state", "expires_in": 60},
+                {"code": "K" * 43, "state": state, "expires_in": 61},
+                {"code": "short", "state": state, "expires_in": 60},
+            ):
+                fake = FakeOpener(response_for(bad_payload))
+                with patch("vault_control.quick_access.urllib.request.build_opener", return_value=fake):
+                    with self.assertRaises(quick_access.QuickAccessExchangeError):
+                        quick_access.request_login_ticket(service_url, token, state)
+
+            fake = FakeOpener(response_for({"code": "K" * 43, "state": state, "expires_in": 10}, "text/html"))
+            with patch("vault_control.quick_access.urllib.request.build_opener", return_value=fake):
+                with self.assertRaises(quick_access.QuickAccessExchangeError):
+                    quick_access.request_login_ticket(service_url, token, state)
+
+    def test_quick_access_launch_is_rate_limited(self):
+        service_url = "https://rate-limited.example.test/"
+        with patch.dict(os.environ, {
+            "VAULT_QUICK_ACCESS_SITES": service_url,
+            "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP": "0",
+        }):
+            main_token = self.login()
+            app_id = self.add(main_token, "Limited", service_url)
+            vault_token = self.unlock_vault()
+            self.assertEqual(self.client.post(f"/vault/app/{app_id}/credential", data={
+                "csrf_token": vault_token, "title": "Token",
+            }).status_code, 302)
+            from vault_control.set_quick_access_token import provision_token
+            with closing(self.module.get_db()) as db:
+                credential_id = db.execute(
+                    "SELECT id FROM app_credentials WHERE app_id = ?", (app_id,),
+                ).fetchone()["id"]
+            provision_token(self.module.get_db, app_id, credential_id, service_url, "pat_rate_1234567890")
+            self.assertEqual(self.client.post(f"/vault/credential/{credential_id}/edit", data={
+                "csrf_token": vault_token, "title": "Token", "quick_access_enabled": "1",
+            }).status_code, 302)
+            with patch(
+                "vault_control.blueprint.request_login_ticket",
+                side_effect=lambda _url, _token, _state: (secrets.token_urlsafe(32), 30),
+            ) as exchange:
+                for _ in range(6):
+                    self.assertEqual(self.client.post(
+                        f"/vault/app/{app_id}/quick-access", data={"csrf_token": vault_token},
+                    ).status_code, 200)
+                limited = self.client.post(
+                    f"/vault/app/{app_id}/quick-access", data={"csrf_token": vault_token},
+                )
+            self.assertEqual(limited.status_code, 429)
+            self.assertGreaterEqual(int(limited.headers["Retry-After"]), 1)
+            self.assertEqual(exchange.call_count, 6)
+
+    def test_quick_access_rate_limit_is_atomic_across_threads(self):
+        from vault_control.blueprint import _consume_quick_access_rate_limit
+
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(
+                lambda _index: _consume_quick_access_rate_limit("test-vault", 9001),
+                range(12),
+            ))
+        self.assertEqual(sum(1 for allowed, _retry in results if allowed), 6)
+        self.assertTrue(all(retry >= 1 for allowed, retry in results if not allowed))
+
     def test_old_vault_database_migrates_without_enabling_autologin(self):
         token = self.login()
         app_id = self.add(token, "Old", "https://msb-activity.meryosab.com/login")
@@ -376,7 +634,20 @@ class QuickAccessTests(unittest.TestCase):
         with closing(self.module.get_db()) as db:
             columns = {row[1] for row in db.execute("PRAGMA table_info(app_credentials)")}
             self.assertIn("auto_login", columns)
-            self.assertEqual(db.execute("SELECT auto_login FROM app_credentials").fetchone()[0], 0)
+            self.assertTrue({
+                "quick_access_token_enc", "quick_access_enabled", "quick_access_target",
+            }.issubset(columns))
+            row = db.execute(
+                "SELECT auto_login, quick_access_token_enc, quick_access_enabled "
+                "FROM app_credentials"
+            ).fetchone()
+            self.assertEqual(
+                (row["auto_login"], row["quick_access_token_enc"], row["quick_access_enabled"]),
+                (0, "", 0),
+            )
+            self.assertIsNotNone(db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='quick_access_rate_limits'"
+            ).fetchone())
         self.assertFalse(self.card_autologin(app_id))
 
     def test_spoofed_proxy_header_cannot_bypass_ip_allowlist(self):
