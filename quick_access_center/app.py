@@ -264,7 +264,12 @@ init_db()
 # --------------------------------------------------------------------------------------
 try:
     from vault_control import init_vault_control
-    from vault_control.autologin import is_supported_login_url
+    from vault_control.autologin import (
+        is_quick_access_supported_url,
+        is_supported_login_url,
+        normalize_login_url,
+        quick_access_private_http_allowed,
+    )
     from vault_control.vault_settings import (
         get_csrf_token as get_vault_csrf_token,
         get_vault_config,
@@ -282,6 +287,7 @@ try:
         "vault_control.vault_logout",
         "vault_control.app_vault",
         "vault_control.autologin_credential",
+        "vault_control.quick_access_launch",
         "vault_control.create_credential",
         "vault_control.update_credential",
         "vault_control.delete_credential",
@@ -913,8 +919,7 @@ def dashboard():
         cur.execute(apps_sql, tuple(query_params))
         apps = cur.fetchall()
 
-        # Only deliberately selected credentials for the pinned HTTPS login
-        # page become auto-login cards. Passwords are never fetched here.
+        # The extension mode exposes only a boolean card marker; no password is fetched here.
         cur.execute("SELECT app_id FROM app_credentials WHERE auto_login = 1")
         marked_ids = {int(row["app_id"]) for row in cur.fetchall()}
         vault_enabled = get_vault_config()["enabled"]
@@ -923,6 +928,27 @@ def dashboard():
             if vault_enabled and int(item["id"]) in marked_ids
             and is_supported_login_url(item["url"])
         }
+
+        # Ticket mode exposes only enabled record IDs and bound URLs, never tokens.
+        cur.execute("""SELECT app_id, quick_access_target FROM app_credentials
+                       WHERE quick_access_enabled = 1 AND quick_access_token_enc != ''""")
+        quick_access_targets = {int(row["app_id"]): str(row["quick_access_target"] or "")
+                                for row in cur.fetchall()}
+        vault_unlocked = vault_enabled and is_vault_logged_in()
+        quick_access_ids = set()
+        if vault_unlocked:
+            for item in apps:
+                app_id = int(item["id"])
+                canonical_target = normalize_login_url(
+                    item["url"],
+                    allow_private_http=quick_access_private_http_allowed(),
+                )
+                if (
+                    canonical_target
+                    and quick_access_targets.get(app_id) == canonical_target
+                    and is_quick_access_supported_url(item["url"])
+                ):
+                    quick_access_ids.add(app_id)
 
         cur.execute("SELECT COUNT(*) AS total FROM apps")
         total_apps = cur.fetchone()["total"]
@@ -935,12 +961,13 @@ def dashboard():
 
         conn.close()
 
-        vault_unlocked = vault_enabled and is_vault_logged_in()
         return render_template(
             "dashboard.html",
             apps=apps,
             auto_login_ids=auto_login_ids,
+            quick_access_ids=quick_access_ids,
             vault_autologin_csrf=get_vault_csrf_token() if vault_unlocked else "",
+            vault_quick_access_csrf=get_vault_csrf_token() if vault_unlocked else "",
             search=search,
             categories=categories,
             selected_category=selected_category,
@@ -956,7 +983,9 @@ def dashboard():
             "dashboard.html",
             apps=[],
             auto_login_ids=set(),
+            quick_access_ids=set(),
             vault_autologin_csrf="",
+            vault_quick_access_csrf="",
             search=search,
             categories=[{"value": category_all, "label": "Все категории", "count": 0}],
             selected_category=category_all,

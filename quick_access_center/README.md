@@ -48,6 +48,20 @@ $env:MSB_QUICK_ACCESS_COOKIE_SECURE = "0"
 
 Создайте карточку с **точной ссылкой** на страницу входа, нажмите на ней **🔐**, откройте Vault, сохраните логин/пароль этого сервиса и отметьте **«Использовать этот доступ для автовхода»**. Установите расширение для Chrome/Edge и подключите его к своей панели по [инструкции расширения](browser_extension/README.md). Пока Vault разблокирован, нажатие на карточку откроет сайт и заполнит его форму. **Без расширения карточка только открывает страницу входа**: браузер не разрешает обычному сайту Quick Access заполнить чужую форму. Сервисы с CAPTCHA или обязательным вторым фактором расширение не обходит.
 
+## Ticket-вход Quick Access ↔ MSB Activity без расширения
+
+Краткие шаги установки и подключения вынесены в [`QUICK_ACCESS_DEPLOYMENT.md`](QUICK_ACCESS_DEPLOYMENT.md); точный API-контракт — в [`QUICK_ACCESS_PROTOCOL.md`](QUICK_ACCESS_PROTOCOL.md). Quick Access вызывает `POST /api/quick-access/v1/authorize` с сервера и отправляет в браузер только одноразовый код для top-level POST на `/quick-access/callback`. PAT остаётся зашифрованным в существующем Vault, а серверный ввод/ротация выполняется CLI-командой.
+
+> **Не включайте token-вход в production пока не решена передача PAT.** По сообщённой реализации MSB Activity показывает постоянный токен один раз в HTML профиля. Это нарушает заданное требование не передавать постоянные токены через HTML/браузер. Не копируйте такой токен в Quick Access; попросите добавить серверную CLI-команду или защищённое server-to-server provisioning, затем отзовите уже показанный токен и выпустите новый.
+>
+> Также требуется сквозной тест с реально развернутым MSB Activity: исходники целевого сервиса в этом checkout отсутствуют. Quick Access теперь следует описанному MSB API, но совместимость с конкретным релизом целевого сервиса здесь проверить нельзя.
+
+В Quick Access используется точный список карточек `VAULT_QUICK_ACCESS_SITES`, по умолчанию только HTTPS; `VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP=1` — исключительно изолированная dev-сеть. Подробные шаги, значения URL и команды systemd см. в кратком руководстве.
+
+**Vault общий, не персональный.** В Quick Access один общий Vault-пользователь и нет изоляции токенов по сотрудникам. Токен MSB Activity привязан к существующему пользователю MSB и scope `quick_access:login`, но все люди с доступом к общему Vault смогут инициировать вход именно под этой целевой учётной записью. Не считайте это индивидуальным SSO сотрудников.
+
+Обычный вход, старые карточки и browser extension сохранены. Новые сторонние зависимости или отдельный SSO-сервер не добавляются.
+
 ## Доступ из сети / production
 
 Используйте HTTPS reverse proxy (Nginx, Caddy и т. п.) и Gunicorn, доступный **только локально**. Внутри `quick_access_center/` с активированным venv и заданным постоянным `MSB_QUICK_ACCESS_DATA_DIR`:
@@ -87,6 +101,37 @@ MAIN_ACCESS_TRUSTED_PROXIES=127.0.0.1,::1
 ```
 
 Для Vault — аналогичные `VAULT_ACCESS_ALLOWED_IPS`, `VAULT_ACCESS_TRUST_PROXY`, `VAULT_ACCESS_TRUSTED_PROXIES`. Укажите **свои** адреса и сеть; прокси с другого хоста должен быть явно добавлен в `*_TRUSTED_PROXIES`. Включайте `TRUST_PROXY=1` только за прокси, который очищает/дополняет `X-Forwarded-For`. Код не доверяет заголовкам от произвольного посетителя. Не используйте `ALLOWED_IPS=*` в production. После изменения `.env` перезапустите Gunicorn.
+
+### Автоустановка/удаление Linux systemd
+
+Для Linux с systemd из постоянного checkout репозитория:
+
+```bash
+cd quick_access_center
+sudo ./deploy/install.sh
+```
+
+Установщик берёт пользователя, вызвавшего `sudo`, запускает интерактивные `setup_access.py` и `setup_vault.py` только если соответствующих конфигураций ещё нет, создаёт venv в `/opt/quick-access-center-venv`, а службу `quick-access-center.service` включает автоматически. При повторном запуске существующие `access.env`, `vault.env` и ключ Vault не перезаписываются; обновляются зависимости и unit. Исходники должны оставаться по тому же пути. Для другого пользователя или checkout передавайте переменные через `sudo env`, например `sudo env QUICK_ACCESS_SERVICE_USER=appuser QUICK_ACCESS_APP_DIR=/srv/quick-access-center QUICK_ACCESS_PORT=5051 ./deploy/install.sh`; сервисный пользователь должен иметь доступ к исходникам и создавать отсутствующие конфиги.
+
+Gunicorn слушает только `127.0.0.1:5050` (или `QUICK_ACCESS_PORT`), открывать этот порт в firewall не нужно. Установщик **не настраивает домен или TLS reverse proxy** — настройте его по инструкциям выше. `MSB_QUICK_ACCESS_COOKIE_SECURE=1` включён; панель предназначена для HTTPS, не для прямого HTTP-доступа. IP allowlist по умолчанию ограничен localhost; перед внешним доступом проверьте `access_control/access.env` и `vault_control/vault.env`.
+
+Проверка и журналы:
+
+```bash
+sudo systemctl status quick-access-center
+sudo journalctl -u quick-access-center -f
+sudo systemctl restart quick-access-center
+```
+
+Безопасное удаление службы:
+
+```bash
+sudo ./deploy/uninstall.sh                 # остановить/удалить unit; данные и конфиги оставить
+sudo ./deploy/uninstall.sh --remove-venv   # дополнительно удалить venv (с подтверждением)
+sudo ./deploy/uninstall.sh --purge-data    # безвозвратно удалить БД, картинки, логи и rate-limit state
+```
+
+`--purge-data` требует интерактивно набрать точный путь; без явного флага данные не удаляются. Исходники, `access.env`, `vault.env` и `VAULT_ENCRYPTION_KEY` сохраняются даже при удалении службы. Перед удалением данных сохраните нужные резервные копии и отдельно отзовите PAT целевых сервисов.
 
 ## Проверка и данные
 

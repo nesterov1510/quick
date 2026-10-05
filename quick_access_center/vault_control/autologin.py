@@ -1,11 +1,10 @@
-"""Explicit allowlist for browser-extension auto login targets.
+"""Separate exact allowlists for extension auto-login and ticket login.
 
-Never send a Vault password to an arbitrary URL stored in a card. Supporting
-another service requires reviewing its login flow and listing that exact URL
-here (``BUILT_IN_LOGIN_URLS`` or ``VAULT_AUTOLOGIN_SITES`` in
-``vault_control/vault.env``), plus a matching entry in
-``browser_extension/sites.json`` with the browser's host permission for that
-origin.
+Never send a Vault password or service token to an arbitrary URL stored in a
+card. Extension auto-login uses ``BUILT_IN_LOGIN_URLS``/``VAULT_AUTOLOGIN_SITES``
+and a matching browser-extension entry. Quick Access tickets use their own
+``VAULT_QUICK_ACCESS_SITES`` and fixed API/callback paths; the two lists never
+implicitly widen each other.
 
 Entries are exact login URLs. Wildcards, credentials in the URL, query strings
 and fragments are rejected: an allowlist that can be widened by editing a card
@@ -31,6 +30,8 @@ BUILT_IN_LOGIN_URLS: Tuple[str, ...] = (
 )
 EXTRA_LOGIN_URLS_ENV = "VAULT_AUTOLOGIN_SITES"
 ALLOW_PRIVATE_HTTP_ENV = "VAULT_AUTOLOGIN_ALLOW_PRIVATE_HTTP"
+QUICK_ACCESS_SITES_ENV = "VAULT_QUICK_ACCESS_SITES"
+QUICK_ACCESS_ALLOW_PRIVATE_HTTP_ENV = "VAULT_QUICK_ACCESS_ALLOW_PRIVATE_HTTP"
 
 # vault.env is re-read only when it actually changed; the dashboard renders
 # frequently and must not touch the disk on every request.
@@ -82,10 +83,11 @@ def private_http_allowed() -> bool:
 
 
 def is_private_host(host: str) -> bool:
-    """Only IP literals of private networks and ``localhost`` count.
+    """Only RFC1918/ULA IP literals and ``localhost`` count as private.
 
     A private *domain name* is not accepted: it can resolve anywhere, so it
-    would quietly turn the opt-in into "any HTTP site".
+    would quietly turn the opt-in into "any HTTP site". Link-local, reserved,
+    documentation and otherwise non-routable ranges are rejected as well.
     """
     clean = (host or "").strip().lower().strip("[]")
     if clean == "localhost":
@@ -96,9 +98,14 @@ def is_private_host(host: str) -> bool:
         return False
     if address.is_loopback:
         return True
-    # Link-local (169.254/16, fe80::/10) is a misconfiguration rather than a
-    # managed internal network, and the browser-side twin rejects it too.
-    return bool(address.is_private and not address.is_link_local)
+    if address.version == 4:
+        private_ranges = (
+            ipaddress.ip_network("10.0.0.0/8"),
+            ipaddress.ip_network("172.16.0.0/12"),
+            ipaddress.ip_network("192.168.0.0/16"),
+        )
+        return any(address in network for network in private_ranges)
+    return address in ipaddress.ip_network("fc00::/7")
 
 
 def normalize_login_url(raw: object, allow_private_http: bool = False) -> Optional[str]:
@@ -125,10 +132,12 @@ def normalize_login_url(raw: object, allow_private_http: bool = False) -> Option
 
     path = parts.path or "/"
     if parts.scheme == "https":
-        netloc = host if port in (None, 443) else f"{host}:{port}"
+        host_part = f"[{host}]" if ":" in host else host
+        netloc = host_part if port in (None, 443) else f"{host_part}:{port}"
         return f"https://{netloc}{path}"
     if parts.scheme == "http" and allow_private_http and is_private_host(host):
-        netloc = host if port in (None, 80) else f"{host}:{port}"
+        host_part = f"[{host}]" if ":" in host else host
+        netloc = host_part if port in (None, 80) else f"{host_part}:{port}"
         return f"http://{netloc}{path}"
     return None
 
@@ -205,3 +214,50 @@ def describe_supported_login_urls(urls=None) -> str:
     if len(items) == 1:
         return items[0]
     return ", ".join(items[:-1]) + " и " + items[-1]
+
+
+def quick_access_private_http_allowed() -> bool:
+    """Separate, explicit opt-in for sending a Quick Access token over private HTTP."""
+    return _config_value(QUICK_ACCESS_ALLOW_PRIVATE_HTTP_ENV).strip().lower() in {
+        "1", "true", "yes", "on", "да"
+    }
+
+
+
+def parse_quick_access_urls(
+    raw: Optional[str] = None,
+    allow_private_http: Optional[bool] = None,
+) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """Parse exact login URLs for services implementing the ticket protocol."""
+    source = _config_value(QUICK_ACCESS_SITES_ENV) if raw is None else str(raw or "")
+    insecure = quick_access_private_http_allowed() if allow_private_http is None else allow_private_http
+    valid: list[str] = []
+    invalid: list[str] = []
+
+    for item in source.replace("\n", ",").split(","):
+        entry = item.strip()
+        if not entry:
+            continue
+        canonical = normalize_login_url(entry, allow_private_http=insecure)
+        if not canonical:
+            if entry not in invalid:
+                invalid.append(entry)
+        elif canonical not in valid:
+            valid.append(canonical)
+    return tuple(valid), tuple(invalid)
+
+
+def supported_quick_access_urls() -> Tuple[str, ...]:
+    return parse_quick_access_urls()[0]
+
+
+def invalid_quick_access_url_entries() -> Tuple[str, ...]:
+    return parse_quick_access_urls()[1]
+
+
+def is_quick_access_supported_url(url: object) -> bool:
+    canonical = normalize_login_url(
+        url,
+        allow_private_http=quick_access_private_http_allowed(),
+    )
+    return bool(canonical) and canonical in supported_quick_access_urls()

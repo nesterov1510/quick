@@ -46,6 +46,23 @@
         {% endif %}
     </div>
 
+    <div class="warning-box autologin-sites">
+        <b>🔑 Token-вход без расширения разрешён для:</b>
+        {% if quick_access_urls %}
+            {% for item in quick_access_urls %}<code>{{ item }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+        {% else %}
+            <span>пока ни одного сервиса</span>
+        {% endif %}
+        <br>Список задаётся отдельно в <code>VAULT_QUICK_ACCESS_SITES</code>. Для каждой карточки нужен отдельный сервисный токен.
+        {% if quick_access_invalid %}
+            <br><b>Пропущены некорректные URL:</b>
+            {% for item in quick_access_invalid %}<code>{{ item }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+        {% endif %}
+        {% if quick_access_private_http %}
+            <br><b>⚠ Частный HTTP включён:</b> PAT и одноразовый handoff могут быть перехвачены/подменены в локальной сети; не используйте в production.
+        {% endif %}
+    </div>
+
     {% if apps %}
     <div class="vault-app-grid">
         {% for item in apps %}

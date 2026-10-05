@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Вход в {{ service_name }}</title>
+</head>
+<body>
+    <main>
+        <h1>Выполняется вход в {{ service_name }}</h1>
+        <p>Сервис получит одноразовый код. Постоянный токен Quick Access в браузер не передаётся.</p>
+        <p>Код короткоживущий и может быть использован только один раз.</p>
+        <form id="quick-access-handoff" method="post" action="{{ callback_url }}" autocomplete="off">
+            <input type="hidden" name="code" value="{{ code }}">
+            <input type="hidden" name="state" value="{{ state }}">
+            <input type="hidden" name="service" value="{{ service_id }}">
+            <input type="hidden" name="callback_uri" value="{{ callback_url }}">
+            <input type="hidden" name="attempt_id" value="{{ attempt_id }}">
+            <button type="submit">Продолжить</button>
+        </form>
+        <noscript><p>Автоматический переход недоступен. Нажмите «Продолжить».</p></noscript>
+    </main>
+    <script nonce="{{ csp_nonce }}">document.getElementById('quick-access-handoff').submit();</script>
+</body>
+</html>

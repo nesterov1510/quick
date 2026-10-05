@@ -51,7 +51,12 @@
                                 <h3>{{ credential.title }}</h3>
                                 <span>Обновлено: {{ credential.updated_at }}</span>
                                 {% if credential.auto_login and auto_login_supported %}
-                                <span class="auto-login-tag">⚡ Выбран для автовхода</span>
+                                <span class="auto-login-tag">⚡ Выбран для автовхода расширением</span>
+                                {% endif %}
+                                {% if credential.quick_access_enabled %}
+                                <span class="auto-login-tag">🔑 Вход через Quick Access включён</span>
+                                {% elif credential.quick_access_token_configured %}
+                                <span class="auto-login-tag">🔑 Токен Quick Access сохранён, но отключён</span>
                                 {% endif %}
                             </div>
                             <a class="small-button" href="{{ url_for('vault_control.app_vault', app_id=app_item.id, edit=credential.id) }}#credentialForm">Редактировать</a>
@@ -97,7 +102,7 @@
             <div class="section-head">
                 <div>
                     <h2>{{ 'Редактировать доступ' if edit_credential else 'Добавить доступ' }}</h2>
-                    <p>Все четыре поля шифруются перед записью в SQLite.</p>
+                    <p>Секреты шифруются перед записью в SQLite. Токен Quick Access не показывается повторно.</p>
                 </div>
                 {% if edit_credential %}
                     <a class="small-button" href="{{ url_for('vault_control.app_vault', app_id=app_item.id) }}#credentialForm">Отмена</a>
@@ -130,6 +135,16 @@
                     </div>
                 </label>
 
+                {% if quick_access_supported %}
+                <p class="auto-login-hint">Постоянный сервисный токен хранится в существующем Vault и не показывается этой страницей. Установка и ротация выполняются интерактивно на сервере командой <code>python vault_control/set_quick_access_token.py</code>. Сервис: <code>msb-activity</code>.</p>
+                {% endif %}
+                {% if edit_credential and edit_credential.quick_access_token_configured %}
+                <p class="auto-login-hint">Токен хранится зашифрованным и не может быть прочитан из этой страницы. После отзыва токена в целевом сервисе отметьте ниже удаление.</p>
+                <label class="field">
+                    <span><input type="checkbox" name="clear_quick_access_token" value="1"> Удалить локально сохранённый токен Quick Access</span>
+                </label>
+                {% endif %}
+
                 <label class="field">
                     <span>Заметка</span>
                     <textarea name="notes" placeholder="2FA, резервные коды, назначение аккаунта, дополнительные инструкции...">{{ edit_credential.notes if edit_credential else '' }}</textarea>
@@ -138,11 +153,31 @@
                 {% if auto_login_supported %}
                 <label class="auto-login-option">
                     <input type="checkbox" name="auto_login" value="1" {% if edit_credential and edit_credential.auto_login %}checked{% endif %}>
-                    <span><b>Использовать этот доступ для автовхода</b>
-                    <small>Разрешённые адреса входа: {{ auto_login_urls }}. Если отмечен другой доступ этой карточки, выбор переключится на этот.</small></span>
+                    <span><b>Использовать этот доступ для автовхода расширением</b>
+                    <small>Если отмечен другой доступ этой карточки, выбор переключится на этот.</small></span>
                 </label>
                 {% else %}
-                <p class="auto-login-hint">Автовход с расширением разрешён только для: {{ auto_login_urls }}. Адрес этой карточки в список не входит, поэтому пароли остаются в Vault для ручного входа.</p>
+                <p class="auto-login-hint">Автовход с расширением разрешён только для: {{ auto_login_urls }}. Адрес этой карточки в список не входит.</p>
+                {% endif %}
+
+                {% if (edit_credential and edit_credential.quick_access_token_configured and quick_access_supported) or (edit_credential and edit_credential.quick_access_enabled) %}
+                <label class="auto-login-option">
+                    <input type="checkbox" name="quick_access_enabled" value="1" {% if edit_credential and edit_credential.quick_access_enabled %}checked{% endif %}>
+                    <span><b>Вход через Quick Access без расширения</b>
+                    <small>Для этого способа целевой сервис должен реализовать ticket API. Один активный токен на карточку; новый выбор отключит прежний.</small></span>
+                </label>
+                {% if edit_credential and edit_credential.quick_access_enabled and not edit_quick_access_target_matches %}
+                <p class="auto-login-hint">Адрес карточки изменился после привязки токена. Снимите флажок, чтобы отключить вход, или повторно привяжите токен серверной CLI-командой.</p>
+                {% endif %}
+                {% elif quick_access_supported %}
+                <p class="auto-login-hint">Сначала сохраните запись без включения Quick Access, установите токен серверной CLI-командой и затем отредактируйте эту запись.</p>
+                {% elif quick_access_urls %}
+                <p class="auto-login-hint">Ticket-вход появится для карточек с точным адресом из <code>VAULT_QUICK_ACCESS_SITES</code>. Сейчас разрешено: {{ quick_access_urls|join(', ') }}.</p>
+                {% else %}
+                <p class="auto-login-hint">Ticket-вход не настроен. Сначала добавьте точный URL сервиса в <code>VAULT_QUICK_ACCESS_SITES</code> в <code>vault_control/vault.env</code>.</p>
+                {% endif %}
+                {% if quick_access_private_http %}
+                <p class="auto-login-hint">⚠ Глобально включён opt-in частного HTTP. Если карточка использует HTTP, постоянный токен и одноразовый callback можно перехватить или подменить в локальной сети. Только для изолированной разработки, никогда не для production.</p>
                 {% endif %}
 
                 <button class="primary-button full" type="submit">
